@@ -18,6 +18,8 @@ HOLE_S = 3.0  # дыра без токенов, где речи (по энерг
 HOLE_WPS = 1.5  # текст дыры берётся, если слов в нём не меньше этого на секунду её речи (иначе музыка, шум)
 PIECE_S = 10.0  # дыра декодируется частями не длиннее этого
 FRAME_S = 0.05  # окно оценки энергии
+HOLE_DB = 10.0  # речь в дыре: окна не тише уровня токенов первого прохода больше чем на столько (тише — фон)
+MAX_HOLES = 3  # дыр на кусок не больше этого (с наибольшей речью): время на шуме ограничено
 
 
 def threads() -> int:
@@ -111,30 +113,48 @@ def _words(r) -> int:
     return sum(len(t.split()) for _, _, t in r)
 
 
-def _speech(piece: np.ndarray) -> np.ndarray:
-    """Окна FRAME_S с речью по энергии: громче десятой доли 90-го перцентиля куска и не тише -60 дБ."""
+def _energy(piece: np.ndarray) -> np.ndarray:
     f = int(FRAME_S * SR)
     n = len(piece) // f
-    e = np.sqrt((piece[:n * f].reshape(n, f) ** 2).mean(1))
-    return e > max(0.1 * np.percentile(e, 90), 1e-3) if n else e > 0
+    return np.sqrt((piece[:n * f].reshape(n, f) ** 2).mean(1))
+
+
+def _speech(piece: np.ndarray, ts: list | None = None) -> np.ndarray:
+    """Окна FRAME_S с речью по энергии: громче десятой доли 90-го перцентиля куска и не тише -60 дБ. ts — времена
+    токенов первого прохода: тогда ещё и не тише медианы окон с токенами больше чем на HOLE_DB (фон, чужая речь)."""
+    e = _energy(piece)
+    if not len(e):
+        return e > 0
+    mask = e > max(0.1 * np.percentile(e, 90), 1e-3)
+    frames = sorted({j for t in ts or [] for j in range(int(t / FRAME_S), min(len(e), int((t + 0.2) / FRAME_S) + 1))})
+    if frames:
+        mask &= e >= np.median(e[frames]) * 10 ** (-HOLE_DB / 20)
+    return mask
 
 
 def _speech_s(mask: np.ndarray, a: float, b: float) -> float:
     return float(mask[max(0, int(a / FRAME_S)):max(0, int(b / FRAME_S))].sum()) * FRAME_S
 
 
+def _nwords(toks) -> int:
+    return len("".join(toks).replace("▁", " ").split())
+
+
 def _hole(rec, piece: np.ndarray, mask: np.ndarray, ca: float, cb: float) -> tuple[list, list]:
     """Токены дыры [ca, cb) и их времена от начала куска: слева направо частями не длиннее PIECE_S (разрез в самом
-    тихом месте второй половины части), каждая с отступами PAD_S; токены в отступе отбрасываются. Часть, где слов
-    меньше HOLE_WPS на секунду речи (музыка, шум), и всё после неё не берутся: на музыке это один вызов."""
+    тихом месте второй половины части), каждая с отступами PAD_S; токены в отступе отбрасываются. Часть без речи или
+    где слов меньше HOLE_WPS на секунду речи (музыка, шум), и всё после неё не берутся: на музыке это один вызов."""
     toks, ts, pos = [], [], ca
     while cb - pos > 1e-3:
         end = cb if cb - pos <= PIECE_S else _quietest(
             piece, int((pos + PIECE_S / 2) * SR), int((pos + PIECE_S) * SR)) / SR
+        sp = _speech_s(mask, pos, end)
+        if sp == 0:
+            break
         part = piece[int(pos * SR):int(end * SR)]
         res = _result(rec, part, PAD_S)
         keep = [(k, pos + max(t, 0.0)) for k, t in zip(res.tokens, res.timestamps) if -0.2 < t < end - pos]
-        if len("".join(k for k, _ in keep).replace("▁", " ").split()) < HOLE_WPS * _speech_s(mask, pos, end):
+        if _nwords(k for k, _ in keep) < HOLE_WPS * sp:
             break
         toks += [k for k, _ in keep]
         ts += [t for _, t in keep]
@@ -142,23 +162,37 @@ def _hole(rec, piece: np.ndarray, mask: np.ndarray, ca: float, cb: float) -> tup
     return toks, ts
 
 
+def _seam(hk: list, ht: list, nxt: str | None) -> tuple[list, list]:
+    """Вставка перед токеном первого прохода со строчной буквы не кончает предложение: финальная . ? ! снимается."""
+    if not hk or nxt is None or not nxt.replace("▁", "").strip()[:1].islower():
+        return hk, ht
+    hk, ht = list(hk), list(ht)
+    while hk and not hk[-1].replace("▁", "").strip(".?! "):
+        hk.pop(), ht.pop()
+    if hk:
+        hk[-1] = hk[-1].rstrip(".?!")
+    return hk, ht
+
+
 def _fill_holes(rec, piece: np.ndarray, res) -> SimpleNamespace:
     """Parakeet (greedy) иногда обрывает текст посреди куска: до первого токена, после последнего или между токенами
     остаётся речь без слов. Дыра, где речи от HOLE_S, декодируется отдельно (_hole) и её токены вставляются; где
-    слов меньше HOLE_WPS на секунду речи — музыка или шум, там текст не меняется. Края дыры — в тишине рядом
+    слов меньше HOLE_WPS на секунду речи — музыка или шум, там текст не меняется. Речь — окна не тише токенов
+    первого прохода больше чем на HOLE_DB; дыр на кусок не больше MAX_HOLES. Края дыры — в тишине рядом
     с соседними токенами: время токена — его начало, поэтому левый край ищется после него, правый перед ним."""
     dur = len(piece) / SR
     toks, ts = list(res.tokens), list(res.timestamps)
-    mask = _speech(piece)
+    mask = _speech(piece, ts)
     edges = [-0.5] + ts + [dur + 0.3]
     holes = [(a, b) for a, b in zip(edges, edges[1:]) if _speech_s(mask, a + 0.5, b - 0.3) >= HOLE_S]
+    holes = sorted(sorted(holes, key=lambda h: -_speech_s(mask, h[0] + 0.5, h[1] - 0.3))[:MAX_HOLES])
     for a, b in holes:
         ca = _quietest(piece, int((a + 0.1) * SR), int(min(a + 0.8, b) * SR)) / SR if a >= 0 else 0.0
         cb = _quietest(piece, int(max(b - 0.4, ca) * SR), int(b * SR)) / SR if b <= dur else dur
         if cb - ca < MIN_SPLIT_S:
             continue
-        hk, ht = _hole(rec, piece, mask, ca, cb)
         i = sum(1 for t in ts if t < ca)
+        hk, ht = _seam(*_hole(rec, piece, mask, ca, cb), toks[i] if i < len(toks) else None)
         toks[i:i] = hk
         ts[i:i] = ht
     return SimpleNamespace(tokens=toks, timestamps=ts)

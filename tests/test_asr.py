@@ -230,6 +230,73 @@ def test_silent_hole_not_decoded():
     assert rec.calls == 1
 
 
+class HoleRec(FakeRec):
+    """Unpadded samples: the given (token, time) pairs. Padded: a word every `step` s outside the pad, then '.'."""
+
+    def __init__(self, first, step=0.3):
+        self.first, self.step, self.calls = first, step, 0
+
+    def decode_streams(self, streams):
+        self.calls += 1
+        for st in streams:
+            n = len(st.samples) / SR
+            if st.samples[0] != 0:
+                st.result = SimpleNamespace(tokens=[k for k, _ in self.first], timestamps=[t for _, t in self.first])
+                continue
+            ts = list(np.arange(asr.PAD_S + 0.1, n - asr.PAD_S, self.step))
+            st.result = SimpleNamespace(tokens=["▁w"] * len(ts) + ["."], timestamps=ts + [ts[-1] + 0.05])
+
+
+def _text(segs):
+    return " ".join(s["text"] for s in segs)
+
+
+def test_head_hole_filled_before_first_token():
+    rec = HoleRec([("▁tail", 3.6), (".", 3.9)])
+    segs = asr.transcribe(rec, _speech_audio(5), None, chunks=[[0.0, 5.0]])
+    words = _text(segs).split()
+    assert rec.calls == 2 and words[0] == "w" and words[-1] == "tail." and len(words) > 8
+    assert len(segs) == 1  # the '.' of the insert before a lowercase token is dropped: one sentence
+
+
+def test_gap_hole_in_order_and_sentence_kept():
+    rec = HoleRec([("▁a", 0.1), ("▁b", 0.4), ("▁c", 4.6), ("▁d", 4.9), (".", 5.1)])
+    segs = asr.transcribe(rec, _speech_audio(6), None, chunks=[[0.0, 6.0]])
+    words = _text(segs).split()
+    assert rec.calls == 2 and words[:2] == ["a", "b"] and words[-2:] == ["c", "d."] and set(words[2:-2]) == {"w"}
+    assert len(segs) == 1
+
+
+def test_insert_before_capital_keeps_its_period():
+    rec = HoleRec([("▁a", 0.1), ("▁b", 0.4), ("▁Next", 4.6), (".", 5.1)])
+    segs = asr.transcribe(rec, _speech_audio(6), None, chunks=[[0.0, 6.0]])
+    assert len(segs) == 2 and segs[0]["text"].endswith("w.") and segs[1]["text"] == "Next."
+    assert segs[0]["e"] <= segs[1]["s"]
+
+
+def test_words_per_second_threshold():
+    first = [("▁a", 0.1), ("▁b", 0.4)]  # tail hole of about 9 s of speech
+    rec = HoleRec(first, step=1 / (asr.HOLE_WPS + 0.2))
+    assert len(_text(asr.transcribe(rec, _speech_audio(10), None, chunks=[[0.0, 10.0]])).split()) > 10
+    rec = HoleRec(first, step=1 / (asr.HOLE_WPS - 0.2))
+    assert _text(asr.transcribe(rec, _speech_audio(10), None, chunks=[[0.0, 10.0]])) == "a b"
+    assert rec.calls == 2
+
+
+def test_quiet_hole_background_not_decoded():
+    audio = _speech_audio(10)
+    audio[int(1.5 * SR):] = 0.02  # 14 dB under the words: background, not the speaker
+    rec = HoleRec([("▁a", 0.1), ("▁b", 0.4), ("▁c", 0.7)])
+    assert _text(asr.transcribe(rec, audio, None, chunks=[[0.0, 10.0]])) == "a b c" and rec.calls == 1
+
+
+def test_holes_per_chunk_limited():
+    first = [("▁a", t) for t in (0.1, 6.5, 13.0, 19.5, 26.0)]  # 4 gaps and the tail: 5 holes
+    rec = HoleRec(first)
+    asr.transcribe(rec, _speech_audio(30), None, chunks=[[0.0, 30.0]])
+    assert rec.calls == 1 + asr.MAX_HOLES
+
+
 class FakeVad:
     """Stands in for sherpa_onnx.VoiceActivityDetector: yields the given (start, end) seconds after flush()."""
 
