@@ -73,6 +73,28 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr
 нет имени файла): подсказку о правильном вызове (`usage: ...`) и строку ошибки выводит стандартный разбор
 аргументов Python, на английском.
 
+## Другая модель
+
+По умолчанию речь распознаёт многоязычная модель parakeet-tdt-0.6b-v3. Для записей на английском можно взять
+английскую модель parakeet-tdt-0.6b-v2, она точнее на английском:
+
+```
+audio2text запись.mp3 --model parakeet-tdt-0.6b-v2
+```
+
+Она скачается один раз при первом запуске с ней (около 0,48 ГБ). Для ссылок YouTube `--model` действует, только
+когда текст распознаётся программой (нет субтитров или указан `-tr`).
+
+Можно указать папку со своей моделью (transducer в формате sherpa-onnx):
+
+```
+audio2text запись.mp3 --model путь/к/папке
+```
+
+В папке должны быть файлы `encoder.onnx`, `decoder.onnx`, `joiner.onnx` и `tokens.txt`. Вместо каждого из трёх
+файлов `.onnx` может лежать его вариант `.int8.onnx`, он берётся в первую очередь. Ничего не скачивается.
+В строке «Транскрипт» итогового файла будет имя модели или имя папки.
+
 ## Первый запуск
 
 При первом запуске программа один раз скачает модели распознавания: около 0,53 ГБ (на диске займут
@@ -143,6 +165,7 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 | Задача | Модель | Лицензия |
 |---|---|---|
 | Распознавание речи | NVIDIA Parakeet TDT 0.6B v3, int8 (экспорт k2-fsa/sherpa-onnx) | CC-BY-4.0 |
+| Распознавание речи, английский (`--model parakeet-tdt-0.6b-v2`) | NVIDIA Parakeet TDT 0.6B v2, int8 (экспорт k2-fsa/sherpa-onnx) | CC-BY-4.0 |
 | Поиск речи | Silero VAD | MIT |
 | Говорящие | NVIDIA NeMo TitaNet small (экспорт k2-fsa/sherpa-onnx), эмбеддинг 192 | Apache-2.0 (лицензия NeMo Toolkit, карточка NGC nvidia/nemo/titanet_small) |
 
@@ -183,6 +206,15 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
   проекта sherpa-onnx. Текст атрибуции из README пакета модели:
 
   > The weights are NVIDIA's parakeet-tdt-0.6b-v3, trained by NVIDIA and licensed under
+  > [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This ONNX export was produced by the sherpa-onnx
+  > project, whose code is licensed under [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE).
+  > NVIDIA does not endorse this package.
+
+- Распознавание речи на английском (`--model parakeet-tdt-0.6b-v2`): NVIDIA parakeet-tdt-0.6b-v2
+  (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), int8-экспорт проекта sherpa-onnx. Текст атрибуции
+  из README пакета модели:
+
+  > The weights are NVIDIA's parakeet-tdt-0.6b-v2, trained by NVIDIA and licensed under
   > [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This ONNX export was produced by the sherpa-onnx
   > project, whose code is licensed under [Apache-2.0](https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE).
   > NVIDIA does not endorse this package.
