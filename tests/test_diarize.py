@@ -119,6 +119,20 @@ def test_embed_zero_vector_stays_finite():
     assert np.isfinite(e).all()
 
 
+def test_embed_rows_from_streams_not_batch():
+    """embed holds one stream at a time: no raw-audio batch array of all windows."""
+    ext = FakeExtractor()
+    wins = [(0, float(s), float(s) + 1.5) for s in range(0, 600)]
+    audio = np.zeros(SR * 602, np.float32)
+    tracemalloc.start()
+    try:
+        D.embed(ext, audio, wins)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 600 * int(D.WIN_S * SR) * 4 / 4, f"peak {peak / 2**20:.1f} MB"   # far below a 600-window batch
+
+
 def test_silhouette_large_call_bounded_memory():
     """A 2-h call has ~8k windows: the silhouette must not build an n x n distance matrix."""
     emb, truth = _blobs(3, 256, per=3334)
@@ -185,17 +199,3 @@ def test_real_extractor_silence_and_tiny(extractor):
         assert [s["speaker"] for s in out] == ["SPEAKER_00"]
         assert np.isfinite(spk["SPEAKER_00"]["embedding"]).all()
     assert D.diarize(extractor, np.zeros(2 * SR, np.float32), []) == ([], {})
-
-
-def test_embed_rows_from_streams_not_batch():
-    """embed holds one stream at a time: no raw-audio batch array of all windows."""
-    ext = FakeExtractor()
-    wins = [(0, float(s), float(s) + 1.5) for s in range(0, 600)]
-    audio = np.zeros(SR * 602, np.float32)
-    tracemalloc.start()
-    try:
-        D.embed(ext, audio, wins)
-        peak = tracemalloc.get_traced_memory()[1]
-    finally:
-        tracemalloc.stop()
-    assert peak < 600 * int(D.WIN_S * SR) * 4 / 4, f"peak {peak / 2**20:.1f} MB"   # far below a 600-window batch

@@ -8,7 +8,7 @@
 |---|---|---|
 | Распознавание речи | NVIDIA Parakeet TDT 0.6B v3, int8 (экспорт k2-fsa/sherpa-onnx) | CC-BY-4.0 |
 | Поиск речи | Silero VAD | MIT |
-| Говорящие | NVIDIA NeMo TitaNet small (экспорт k2-fsa/sherpa-onnx), эмбеддинг 192 | CC-BY-4.0 (по карточке TitaNet large; карточку small на NGC проверить) |
+| Говорящие | NVIDIA NeMo TitaNet small (экспорт k2-fsa/sherpa-onnx), эмбеддинг 192 | Apache-2.0 (лицензия NeMo Toolkit, карточка NGC nvidia/nemo/titanet_small) |
 
 Модели скачиваются один раз в кэш пользователя и проверяются по sha256.
 
