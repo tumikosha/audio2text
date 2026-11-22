@@ -25,3 +25,4 @@ dev = ["pytest"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["models: needs the real models (downloaded once into the cache)"]
