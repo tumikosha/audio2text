@@ -16,7 +16,8 @@ jobs:
       run:
         shell: bash
     env:
-      AUDIO2TEXT_CACHE: ${{ github.workspace }}/.a2t-cache
+      # кириллица и пробел: модели и запуски идут через не-ASCII путь на всех ОС
+      AUDIO2TEXT_CACHE: ${{ github.workspace }}/кэш моделей
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +27,7 @@ jobs:
       - name: Cache models
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/.a2t-cache/models
+          path: ${{ env.AUDIO2TEXT_CACHE }}/models
           key: models-${{ runner.os }}-${{ hashFiles('src/audio2text/models.py') }}
 
       - name: Tests (with real models)
@@ -47,11 +48,19 @@ jobs:
 
       - name: Smoke - local file
         run: |
-          audio2text tests/data/sample.wav out.md
+          curl -fL -o sample.wav "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/test_wavs/en.wav"
+          audio2text sample.wav out.md
           cat out.md
           grep -q "SPEAKER_" out.md
 
-      - name: Smoke - YouTube (deno path)
+      - name: Smoke - YouTube (субтитры)
+        continue-on-error: true
+        run: |
+          audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" yt-subs.md
+          cat yt-subs.md
+          grep -q "субтитры YouTube" yt-subs.md
+
+      - name: Smoke - YouTube (-tr)
         continue-on-error: true
         run: |
           audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr yt.md

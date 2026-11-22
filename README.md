@@ -189,13 +189,13 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 ## Тестовый файл
 
-`tests/data/sample.wav` (английская речь, один говорящий, около 4 с) — файл `test_wavs/en.wav` из пакета модели
-sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8:
+Тесты и проверка в CI берут английскую запись (один говорящий, около 4 с) — файл `test_wavs/en.wav` из пакета
+модели sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8:
 https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/test_wavs/en.wav
 
-Лицензия файла: отдельные условия для `test_wavs` в пакете не указаны. Карточка репозитория на Hugging Face
-объявляет для всего пакета CC-BY-4.0; README пакета говорит только о весах модели и коде экспорта, про записи
-в `test_wavs` в нём ничего нет. Поэтому лицензия самого файла точно не подтверждена.
+Файл скачивается при запуске (тесты кладут его в кэш pytest) и в репозиторий не входит: отдельные условия для
+`test_wavs` в пакете не указаны. Карточка репозитория на Hugging Face объявляет для всего пакета CC-BY-4.0;
+README пакета говорит только о весах модели и коде экспорта, про записи в `test_wavs` в нём ничего нет.
 
 ## Для разработчика
 
