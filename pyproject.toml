@@ -1,0 +1,27 @@
+[project]
+name = "audio2text"
+version = "0.1.0"
+description = "Аудиофайл или ссылка YouTube в Markdown с говорящими, локально (sherpa-onnx)"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "sherpa-onnx",
+    "numpy",
+    "imageio-ffmpeg",
+    "platformdirs",
+]
+
+[project.scripts]
+audio2text = "audio2text.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audio2text"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
