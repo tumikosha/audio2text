@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pytest
 
-from audio2text import cli, pipeline, sources
+from audio2text import cli, media, pipeline, sources
 
 URL = "https://www.youtube.com/watch?v=abc"
 INFO = {"title": "Лекция: тема/1", "duration": 75}
@@ -40,12 +42,20 @@ def _fake_url(monkeypatch, calls, tracks=(("ru", "subtitles"),)):
         p.write_bytes(b"x")
         return p
 
+    def download_video(url, work):
+        calls.append("download_video")
+        p = work / "video" / "src.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"video")
+        return p
+
     def transcribe_file(path, log=print, model=None):
-        calls.append("transcribe")
+        calls.append(("transcribe", Path(path).name))
         return _doc(path)
 
     monkeypatch.setattr(sources, "captions_doc", captions_doc)
     monkeypatch.setattr(sources, "download", download)
+    monkeypatch.setattr(sources, "download_video", download_video)
     monkeypatch.setattr(pipeline, "transcribe_file", transcribe_file)
 
 
@@ -89,7 +99,7 @@ def test_cli_url_transcribe_flag(monkeypatch, iso):
     calls = []
     _fake_url(monkeypatch, calls)
     assert cli.main([URL, "-tr"]) == 0
-    assert calls == ["download", "transcribe"]
+    assert calls == ["download", ("transcribe", "src.webm")]
     text = (iso / "Лекция тема 1.md").read_text(encoding="utf-8")
     assert text.startswith("# Лекция: тема/1\n")
     assert f"- Источник: {URL}\n" in text
@@ -100,7 +110,7 @@ def test_cli_url_no_captions_falls_back(monkeypatch, iso):
     calls = []
     _fake_url(monkeypatch, calls, tracks=())
     assert cli.main([URL]) == 0
-    assert calls == ["download", "transcribe"]
+    assert calls == ["download", ("transcribe", "src.webm")]
 
 
 def test_cli_unexpected_error_one_line(tmp_path, monkeypatch, capsys):
@@ -181,3 +191,105 @@ def test_cli_model_passed_to_pipeline(tmp_path, monkeypatch, iso):
                         _doc(path))
     assert cli.main([str(src), "--model", "parakeet-tdt-0.6b-v2"]) == 0
     assert got[0].label == "parakeet-tdt-0.6b-v2" and got[0].model.name == "parakeet-tdt-0.6b-v2-int8"
+
+
+def _fake_mp3(monkeypatch, calls):
+    def to_mp3(src, dst):
+        assert src.exists()  # made before the video is moved away
+        calls.append(("mp3", src.name))
+        dst.write_bytes(b"mp3 of " + src.read_bytes())
+    monkeypatch.setattr(media, "to_mp3", to_mp3)
+
+
+def _touched(*a, **k):
+    raise AssertionError("no work expected")
+
+
+def test_cli_video_needs_url(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline, "transcribe_file", _touched)
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    assert cli.main([str(src), "--video"]) == 2
+    assert capsys.readouterr().err.strip() == "--video работает только для ссылки"
+
+
+def test_cli_existing_media_fails_before_work_file(tmp_path, monkeypatch, capsys, iso):
+    monkeypatch.setattr(pipeline, "transcribe_file", _touched)
+    monkeypatch.setattr(media, "to_mp3", _touched)
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    (iso / "a.mp3").write_bytes(b"old")
+    assert cli.main([str(src), "--mp3"]) == 2
+    assert capsys.readouterr().err.strip() == "файл уже есть: a.mp3; удалите его или укажите другой выход"
+    assert (iso / "a.mp3").read_bytes() == b"old" and not (iso / "a.md").exists()
+
+
+def test_cli_existing_media_fails_after_info_before_download(monkeypatch, capsys, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    for name in ("captions_doc", "download", "download_video"):
+        monkeypatch.setattr(sources, name, _touched)
+    monkeypatch.setattr(pipeline, "transcribe_file", _touched)
+    for flag, ext in (("--video", ".mp4"), ("--mp3", ".mp3")):
+        p = iso / f"Лекция тема 1{ext}"
+        p.write_bytes(b"old")
+        assert cli.main([URL, flag]) == 2
+        assert capsys.readouterr().err.strip() == f"файл уже есть: {p.name}; удалите его или укажите другой выход"
+        assert p.read_bytes() == b"old"
+        p.unlink()
+    assert not (iso / "Лекция тема 1.md").exists()
+
+
+def test_cli_url_video_and_mp3_from_one_download(monkeypatch, capsys, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    _fake_mp3(monkeypatch, calls)
+    assert cli.main([URL, "-tr", "--video", "--mp3"]) == 0
+    assert calls == ["download_video", ("transcribe", "src.mp4"), ("mp3", "src.mp4")]
+    assert (iso / "Лекция тема 1.mp4").read_bytes() == b"video"
+    assert (iso / "Лекция тема 1.mp3").read_bytes() == b"mp3 of video"
+    assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md", "Лекция тема 1.mp3", "Лекция тема 1.mp4"]
+    out = capsys.readouterr().out
+    assert "сохранено: Лекция тема 1.mp3\n" in out and "сохранено: Лекция тема 1.mp4\n" in out
+
+
+def test_cli_url_captions_with_mp3(monkeypatch, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    _fake_mp3(monkeypatch, calls)
+    assert cli.main([URL, "--mp3"]) == 0
+    assert calls == ["captions", "download", ("mp3", "src.webm")]
+    assert "— `00:00:00` Здравствуйте." in (iso / "Лекция тема 1.md").read_text(encoding="utf-8")
+    assert (iso / "Лекция тема 1.mp3").exists() and not (iso / "Лекция тема 1.mp4").exists()
+
+
+def test_cli_url_captions_with_video(monkeypatch, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    _fake_mp3(monkeypatch, calls)
+    assert cli.main([URL, "--video"]) == 0
+    assert calls == ["captions", "download_video"]
+    assert (iso / "Лекция тема 1.mp4").read_bytes() == b"video"
+
+
+def test_cli_file_mp3_is_source(tmp_path, monkeypatch, capsys):
+    d = tmp_path / "rec"
+    d.mkdir()
+    src = d / "запись.mp3"
+    src.write_bytes(b"orig")
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print, model=None: _doc(path))
+    monkeypatch.setattr(media, "to_mp3", _touched)
+    assert cli.main([str(src), str(d / "запись.md"), "--mp3"]) == 0
+    assert src.read_bytes() == b"orig"
+    out = capsys.readouterr().out
+    assert f"звук уже в mp3: {d / 'запись.mp3'}" in out and "сохранено" not in out
+
+
+def test_cli_file_mp3(tmp_path, monkeypatch, iso):
+    calls = []
+    src = tmp_path / "встреча.m4a"
+    src.write_bytes(b"m4a")
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print, model=None: _doc(path))
+    _fake_mp3(monkeypatch, calls)
+    assert cli.main([str(src), "--mp3"]) == 0
+    assert (iso / "встреча.mp3").read_bytes() == b"mp3 of m4a" and src.read_bytes() == b"m4a"

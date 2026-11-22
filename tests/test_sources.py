@@ -178,3 +178,38 @@ def test_corrupt_json3_is_empty_track(tmp_path, monkeypatch):
         return ""
     monkeypatch.setattr(sources, "_run", fake_run)
     assert sources.captions_doc("u", {}, "ru", "subtitles", tmp_path) is None
+
+
+def test_download_video_args_and_reuse(tmp_path, monkeypatch):
+    seen = []
+
+    def fake(args):
+        seen.append(args)
+        Path(args[args.index("-o") + 1].replace("%(ext)s", "mp4")).write_bytes(b"x")
+        return ""
+    monkeypatch.setattr(sources, "_run", fake)
+    monkeypatch.setattr(sources, "ffmpeg_exe", lambda: "/f/ffmpeg")
+    p = sources.download_video("u", tmp_path)
+    assert p == tmp_path / "video" / "src.mp4"
+    a = seen[0]
+    assert a[a.index("-f") + 1] == "bv*+ba/b" and a[a.index("-S") + 1] == "vcodec:h264,res,acodec:aac"
+    assert a[a.index("--merge-output-format") + 1] == "mp4" and "--no-playlist" in a
+    assert a[a.index("--ffmpeg-location") + 1] == "/f/ffmpeg" and a[-1] == "u"
+    assert sources.download_video("u", tmp_path) == p and len(seen) == 1
+
+
+def test_download_video_ignores_streams_and_merge_temp(tmp_path, monkeypatch):
+    d = tmp_path / "video"
+    d.mkdir()
+    for n in ("src.f137.mp4", "src.f140.m4a", "src.temp.mp4", "src.mp4.part"):
+        (d / n).write_bytes(b"x")
+    seen = []
+
+    def fake(args):
+        seen.append(args)
+        (d / "src.mp4").write_bytes(b"x")
+        return ""
+    monkeypatch.setattr(sources, "_run", fake)
+    monkeypatch.setattr(sources, "ffmpeg_exe", lambda: "/f/ffmpeg")
+    assert sources.download_video("u", tmp_path).name == "src.mp4"
+    assert len(seen) == 1

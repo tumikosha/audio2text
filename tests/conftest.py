@@ -1,9 +1,11 @@
 import os
+import subprocess
 import urllib.request
 
 import pytest
 
 from audio2text import models
+from audio2text.media import ffmpeg_exe
 
 WAV_URL = ("https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
            "/resolve/main/test_wavs/en.wav")
@@ -34,3 +36,12 @@ def asr_dir():
 @pytest.fixture(scope="session")
 def sample_wav(request):
     return fetch_cached(request, "en.wav", WAV_URL)
+
+
+@pytest.fixture(scope="session")
+def tone_wav(tmp_path_factory):
+    """2 s, 440 Hz sine made by the bundled ffmpeg: no network."""
+    p = tmp_path_factory.mktemp("tone") / "tone.wav"
+    subprocess.run([ffmpeg_exe(), "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=2", "-ar", "44100", str(p)], check=True)
+    return p

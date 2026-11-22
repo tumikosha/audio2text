@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import shutil
 import sys
 import traceback
 from pathlib import Path
 
-from . import models, pipeline, sources
+from . import media, models, pipeline, sources
 from .markdown import write
 
 
@@ -38,32 +39,80 @@ def _args(argv):
     ap.add_argument("--model", metavar="M",
                     help=f"модель распознавания: {', '.join(models.ASR_MODELS)} "
                          f"(по умолчанию {models.ASR_DEFAULT}) или путь к папке с моделью")
+    ap.add_argument("--video", action="store_true",
+                    help="ссылка: сохранить и видео рядом с текстом, <выход>.mp4")
+    ap.add_argument("--mp3", action="store_true", help="сохранить и звук рядом с текстом, <выход>.mp3")
     ap.add_argument("--keep", action="store_true", help="не удалять рабочую папку после успеха")
     return ap.parse_args(argv)
+
+
+def _same(a: Path, b: Path) -> bool:
+    return a.exists() and b.exists() and os.path.samefile(a, b)  # samefile: на macOS/Windows регистр не важен
+
+
+def _check_free(a, out: Path, src: Path | None = None) -> None:
+    """Готовые .mp3/.mp4 не перезаписываются: ошибка до скачивания и распознавания. Исключение — mp3, который
+    и есть исходный файл."""
+    for on, ext in ((a.mp3, ".mp3"), (a.video, ".mp4")):
+        p = out.with_suffix(ext)
+        if on and p.exists() and not (src and _same(src, p)):
+            raise SystemExit(f"файл уже есть: {p}; удалите его или укажите другой выход")
+
+
+def _move(src: Path, dst: Path) -> None:
+    """src -> dst через временное имя рядом с dst: рабочая папка может быть на другом диске."""
+    tmp = dst.with_name(f".{dst.stem}.tmp{dst.suffix}")
+    try:
+        tmp.unlink(missing_ok=True)  # остаток оборванного запуска: на Windows переименование на него падает
+        shutil.move(src, tmp)
+        os.replace(tmp, dst)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def run(a, work: Path) -> int:
     asr_model = models.resolve_asr(a.model)  # неверный --model падает до чтения файла и сети
     url = sources.is_url(a.source)
+    if a.video and not url:
+        raise SystemExit("--video работает только для ссылки")
     if not url and not Path(a.source).is_file():
         raise SystemExit(f"файл не найден: {a.source}")
     if url:
         info = sources.youtube_info(a.source, work)
         out = a.out or Path(f"{sources.title_name(info.get('title') or 'transcript')}.md")
+        _check_free(a, out)
         doc = None
         if not a.transcribe:
             for track, kind in sources.caption_tracks(info):
                 if doc := sources.captions_doc(a.source, info, track, kind, work):
                     break
+        # с --video звук для распознавания и mp3 берётся из видео: второй загрузки нет
+        src = sources.download_video(a.source, work) if a.video else (
+            sources.download(a.source, work) if doc is None or a.mp3 else None)
         if doc is None:
-            doc = pipeline.transcribe_file(sources.download(a.source, work), model=asr_model)
+            doc = pipeline.transcribe_file(src, model=asr_model)
             doc["source"], doc["title"] = a.source, info.get("title")
     else:
-        out = a.out or Path(f"{Path(a.source).stem}.md")
-        doc = pipeline.transcribe_file(Path(a.source), model=asr_model)
+        src = Path(a.source)
+        out = a.out or Path(f"{src.stem}.md")
+        _check_free(a, out, src)
+        doc = pipeline.transcribe_file(src, model=asr_model)
     write(doc, out)
     spk = f", говорящих: {len(doc['speakers'])}" if doc.get("speakers") else ""
     print(f"{out}: сегментов {len(doc['segments'])}{spk}", flush=True)
+    saved = []
+    if a.mp3:
+        mp3 = out.with_suffix(".mp3")
+        if not url and _same(src, mp3):
+            print(f"звук уже в mp3: {mp3}", flush=True)
+        else:
+            media.to_mp3(src, mp3)
+            saved.append(mp3)
+    if a.video:  # после mp3: он делается из этого же файла
+        _move(src, out.with_suffix(".mp4"))
+        saved.append(out.with_suffix(".mp4"))
+    for p in saved:
+        print(f"сохранено: {p}", flush=True)
     if not a.keep:
         shutil.rmtree(work, ignore_errors=True)
     return 0
