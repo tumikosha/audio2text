@@ -1,6 +1,4 @@
-import os
 import tracemalloc
-import urllib.request
 import wave
 from types import SimpleNamespace
 
@@ -11,6 +9,8 @@ from audio2text import diarize as D
 from audio2text import models
 from audio2text.diarize import choose_labels
 from audio2text.media import SR
+
+from conftest import fetch_cached
 
 DIMS = [192, 256, 512]   # the candidate speaker models' embedding sizes
 WAV_BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models"
@@ -163,13 +163,7 @@ def extractor():
 
 
 def _fetch(request, name):
-    path = request.config.cache.mkdir("audio2text") / name
-    if not path.exists():
-        with urllib.request.urlopen(f"{WAV_BASE}/{name}", timeout=60) as r:
-            data = r.read()
-        tmp = path.with_name(f"{name}.{os.getpid()}.tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
+    path = fetch_cached(request, name, f"{WAV_BASE}/{name}")
     with wave.open(str(path)) as w:
         assert w.getframerate() == SR and w.getnchannels() == 1 and w.getsampwidth() == 2
         return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768

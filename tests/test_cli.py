@@ -1,0 +1,142 @@
+import pytest
+
+from audio2text import cli, pipeline, sources
+
+URL = "https://www.youtube.com/watch?v=abc"
+INFO = {"title": "Лекция: тема/1", "duration": 75}
+
+
+@pytest.fixture(autouse=True)
+def iso(tmp_path, monkeypatch):
+    """Work folders under tmp_path, outputs in a separate cwd: nothing touches the user cache or the repo."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(cli, "work_root", lambda: tmp_path / "work")
+    return cwd
+
+
+def _doc(source):
+    return {"source": str(source), "transcript": "локально, parakeet-tdt-0.6b-v3", "audio_s": 75.0,
+            "speakers": {"SPEAKER_00": {"speech_s": 1.0, "embedding": []}},
+            "segments": [{"s": 1.0, "e": 2.0, "text": "Привет.", "speaker": "SPEAKER_00"}]}
+
+
+def _fake_url(monkeypatch, calls, tracks=(("ru", "subtitles"),)):
+    monkeypatch.setattr(sources, "youtube_info", lambda url, work: INFO)
+    monkeypatch.setattr(sources, "caption_tracks", lambda info: list(tracks))
+
+    def captions_doc(url, info, track, kind, work):
+        calls.append("captions")
+        return {"source": url, "title": info["title"], "transcript": f"субтитры YouTube {track} ({kind})",
+                "audio_s": 75, "speakers": {}, "segments": [{"s": 0.0, "e": 1.0, "text": "Здравствуйте.",
+                                                             "turn": True}]}
+
+    def download(url, work):
+        calls.append("download")
+        work.mkdir(parents=True, exist_ok=True)
+        p = work / "download" / "src.webm"
+        p.parent.mkdir(exist_ok=True)
+        p.write_bytes(b"x")
+        return p
+
+    def transcribe_file(path, log=print):
+        calls.append("transcribe")
+        return _doc(path)
+
+    monkeypatch.setattr(sources, "captions_doc", captions_doc)
+    monkeypatch.setattr(sources, "download", download)
+    monkeypatch.setattr(pipeline, "transcribe_file", transcribe_file)
+
+
+def test_cli_missing_file(capsys):
+    assert cli.main(["нет такого.mp3"]) == 2
+    assert "файл не найден" in capsys.readouterr().err
+
+
+def test_cli_unicode_path(tmp_path, monkeypatch, iso):
+    src = tmp_path / "Записи" / "встреча 1.m4a"
+    src.parent.mkdir()
+    src.write_bytes(b"x")
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print: _doc(path))
+    assert cli.main([str(src)]) == 0
+    out = iso / "встреча 1.md"
+    text = out.read_bytes().decode("utf-8")
+    assert text.startswith("# встреча 1\n")
+    assert "**SPEAKER_00** `00:00:01` Привет." in text
+    assert not (tmp_path / "work").exists() or not any((tmp_path / "work").iterdir())
+
+
+def test_cli_explicit_out(tmp_path, monkeypatch, iso):
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print: _doc(path))
+    assert cli.main([str(src), str(tmp_path / "итог" / "x.txt")]) == 0
+    assert (tmp_path / "итог" / "x.txt").read_text(encoding="utf-8").startswith("# a\n")
+
+
+def test_cli_url_captions_default(monkeypatch, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    assert cli.main([URL]) == 0
+    assert calls == ["captions"]
+    text = (iso / "Лекция тема 1.md").read_text(encoding="utf-8")
+    assert text.startswith("# Лекция: тема/1\n")
+    assert "— `00:00:00` Здравствуйте." in text
+
+
+def test_cli_url_transcribe_flag(monkeypatch, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    assert cli.main([URL, "-tr"]) == 0
+    assert calls == ["download", "transcribe"]
+    text = (iso / "Лекция тема 1.md").read_text(encoding="utf-8")
+    assert text.startswith("# Лекция: тема/1\n")
+    assert f"- Источник: {URL}\n" in text
+    assert "- Транскрипт: локально, parakeet-tdt-0.6b-v3\n" in text
+
+
+def test_cli_url_no_captions_falls_back(monkeypatch, iso):
+    calls = []
+    _fake_url(monkeypatch, calls, tracks=())
+    assert cli.main([URL]) == 0
+    assert calls == ["download", "transcribe"]
+
+
+def test_cli_unexpected_error_one_line(tmp_path, monkeypatch, capsys):
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+
+    def boom(path, log=print):
+        raise RuntimeError("x\ny")
+
+    monkeypatch.setattr(pipeline, "transcribe_file", boom)
+    assert cli.main([str(src)]) == 1
+    err = capsys.readouterr().err.strip().splitlines()
+    assert len(err) == 1
+    assert err[0].startswith("ошибка: RuntimeError: x y (подробности: ")
+    log = err[0].rsplit("(подробности: ", 1)[1].rstrip(")")
+    assert log.endswith("error.log")
+    assert "RuntimeError" in open(log, encoding="utf-8").read()
+
+
+def test_cli_not_media(tmp_path, capsys):
+    """A text file fails at decoding, before any model download."""
+    src = tmp_path / "заметки.txt"
+    src.write_text("не аудио", encoding="utf-8")
+    assert cli.main([str(src)]) == 2
+    assert "не удалось прочитать аудио" in capsys.readouterr().err
+
+
+def test_cli_help_exit_zero():
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--help"])
+    assert e.value.code == 0
+
+
+@pytest.mark.models
+def test_end_to_end_public_sample(sample_wav, iso):
+    assert cli.main([str(sample_wav)]) == 0
+    text = (iso / "en.md").read_text(encoding="utf-8")
+    assert "- Транскрипт: локально, parakeet-tdt-0.6b-v3\n" in text
+    assert "**SPEAKER_00**" in text

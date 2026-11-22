@@ -1,4 +1,3 @@
-import urllib.request
 from types import SimpleNamespace
 
 import numpy as np
@@ -6,10 +5,6 @@ import pytest
 
 from audio2text import asr, models, vad
 from audio2text.media import SR
-
-WAV_URL = ("https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-           "/resolve/main/test_wavs/en.wav")
-
 
 def test_sentences_split_on_punctuation():
     res = SimpleNamespace(tokens=["▁При", "вет", ".", "▁Как", "?"], timestamps=[0, .2, .4, 1.0, 1.3])
@@ -93,28 +88,9 @@ def test_vad_pad_clipped_to_audio(monkeypatch, tmp_path):
     assert sum(got, []) == pytest.approx([0.0, 1.0])
 
 
-@pytest.fixture(scope="session")
-def vad_dir():
-    return models.ensure(models.VAD)
-
-
-@pytest.fixture(scope="session")
-def asr_dir():
-    return models.ensure(models.ASR)
-
-
 @pytest.mark.models
 def test_vad_silence_empty(vad_dir):
     assert vad.vad_chunks(np.zeros(3 * SR, np.float32), vad_dir) == []
-
-
-@pytest.fixture(scope="session")
-def sample_wav(request):
-    path = request.config.cache.mkdir("audio2text") / "en.wav"
-    if not path.exists():
-        with urllib.request.urlopen(WAV_URL, timeout=60) as r:
-            path.write_bytes(r.read())
-    return path
 
 
 @pytest.mark.models
