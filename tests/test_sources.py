@@ -122,3 +122,33 @@ def test_download_passes_ffmpeg_and_no_playlist(tmp_path, monkeypatch):
     assert p.name == "src.m4a" and "--no-playlist" in seen[0]
     assert seen[0][seen[0].index("--ffmpeg-location") + 1] == "/f/ffmpeg"
     assert sources.download("u", tmp_path) == p and len(seen) == 1
+
+
+def test_run_forces_utf8(monkeypatch):
+    monkeypatch.setattr(sources.shutil, "which", _which("uvx"))
+    seen = {}
+
+    def fake(*a, **k):
+        seen.update(k)
+        return subprocess.CompletedProcess(a[0], 0, "ok", "")
+    monkeypatch.setattr(sources.subprocess, "run", fake)
+    assert sources._run(["-J"]) == "ok"
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+    assert seen["env"]["PYTHONUTF8"] == "1" and seen["env"]["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_info_rejects_playlist_and_cleans_cache(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(sources, "_run", lambda args: seen.append(args) or '{"_type": "playlist", "entries": []}')
+    with pytest.raises(SystemExit, match="плейлист или канал"):
+        sources.youtube_info("https://youtube.com/playlist?list=L", tmp_path)
+    assert not (tmp_path / "info.json").exists()
+    assert "--playlist-items" in seen[0] and "--no-playlist" in seen[0]
+
+
+def test_corrupt_json3_is_empty_track(tmp_path, monkeypatch):
+    def fake_run(args):
+        (Path(args[args.index("-o") + 1]).parent / "sub.ru.json3").write_text("{oops")
+        return ""
+    monkeypatch.setattr(sources, "_run", fake_run)
+    assert sources.captions_doc("u", {}, "ru", "subtitles", tmp_path) is None

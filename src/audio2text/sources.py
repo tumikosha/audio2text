@@ -48,7 +48,8 @@ def ytdlp() -> list[str]:
 
 def _run(args: list[str]) -> str:
     """yt-dlp с аргументами args; stdout. Ошибка -> SystemExit с последней непустой строкой stderr."""
-    r = subprocess.run([*ytdlp(), *args], capture_output=True, text=True)
+    r = subprocess.run([*ytdlp(), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     if r.returncode != 0:
         lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
         raise SystemExit(f"yt-dlp: {lines[-1].strip() if lines else f'код {r.returncode}'}")
@@ -60,8 +61,12 @@ def youtube_info(url: str, work: Path) -> dict:
     p = work / "info.json"
     if not p.exists():
         work.mkdir(parents=True, exist_ok=True)
-        p.write_text(_run(["-J", "--no-playlist", url]), encoding="utf-8")
-    return json.loads(p.read_text(encoding="utf-8"))
+        p.write_text(_run(["-J", "--no-playlist", "--playlist-items", "1", url]), encoding="utf-8")
+    info = json.loads(p.read_text(encoding="utf-8"))
+    if info.get("_type") == "playlist" or "entries" in info:
+        p.unlink(missing_ok=True)
+        raise SystemExit("ссылка на плейлист или канал: укажите ссылку на одно видео")
+    return info
 
 
 def caption_tracks(info: dict) -> list[tuple[str, str]]:
@@ -101,8 +106,11 @@ def captions_doc(url: str, info: dict, track: str, kind: str, work: Path) -> dic
     d.mkdir(parents=True, exist_ok=True)
     _run(["--skip-download", "--no-playlist", "--sub-format", "json3", "--sub-langs", track,
           "--write-subs" if kind == "subtitles" else "--write-auto-subs", "-o", str(d / "sub.%(ext)s"), url])
-    files = list(d.glob("*.json3"))
-    segs = parse_json3(json.loads(files[0].read_text(encoding="utf-8"))) if files else []
+    files = sorted(d.glob("*.json3"))
+    try:
+        segs = parse_json3(json.loads(files[0].read_text(encoding="utf-8"))) if files else []
+    except ValueError:
+        segs = []
     if not segs:
         print(f"субтитры YouTube {track} ({kind}) пусты, пропускаю", flush=True)
         return None
@@ -114,14 +122,14 @@ def captions_doc(url: str, info: dict, track: str, kind: str, work: Path) -> dic
 def download(url: str, work: Path) -> Path:
     """Лучшее аудио <url> в <work>/download/; прежняя загрузка переиспользуется."""
     d = work / "download"
-    done = [p for p in d.glob("*") if p.is_file() and not p.name.endswith((".part", ".ytdl"))] if d.exists() else []
+    done = [p for p in sorted(d.glob("*")) if p.is_file() and not p.name.endswith((".part", ".ytdl"))] if d.exists() else []
     if done:
         return done[0]
     d.mkdir(parents=True, exist_ok=True)
     print(f"скачиваю {url}", flush=True)
     _run(["-f", "bestaudio/best", "--no-playlist", "--ffmpeg-location", ffmpeg_exe(),
           "-o", str(d / "src.%(ext)s"), url])
-    files = [p for p in d.glob("src.*") if not p.name.endswith((".part", ".ytdl"))]
+    files = [p for p in sorted(d.glob("src.*")) if not p.name.endswith((".part", ".ytdl"))]
     if not files:
         raise SystemExit(f"yt-dlp ничего не скачал: {url}")
     return files[0]
