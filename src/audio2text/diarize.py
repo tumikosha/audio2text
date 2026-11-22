@@ -1,5 +1,5 @@
-"""Диаризация: эмбеддинги голоса ONNX-моделью sherpa-onnx по окнам 1.5 с, число говорящих 1-4 по
-косинусному силуэту, k-means. Кластеризация и разметка — на numpy."""
+"""Диаризация: эмбеддинги голоса ONNX-моделью sherpa-onnx по окнам 1.5 с, k-means, число говорящих 1-4 по
+косинусному силуэту, затем слияние кластеров с близкими центроидами. Кластеризация и разметка — на numpy."""
 
 from __future__ import annotations
 
@@ -18,6 +18,18 @@ MIN_WINDOWS = 4
 NEAREST_S = 2.0
 MIXED_SHARE = 0.8
 SIL_MIN = 0.1   # best silhouette below this: one speaker
+# One voice still splits: k-means cuts a long one-voice recording in two clouds whose centroids are close
+# (cosine 0.89-0.94 on five LibriVox readers), with a silhouette up to 0.24. Two different people stay far apart:
+# at most 0.69 over 145 two-person phone calls, at most 0.21 on 10 pairs of LibriVox readers. Merged above this.
+MERGE_COS = 0.8
+# Short recordings (under SHORT_WINDOWS windows, ~15 s of speech): each phrase can form its own cluster, since
+# neighbouring windows overlap by half. One voice: best silhouette up to 0.28 on the 19-s "Me at the zoo"; up to 0.36
+# on 15-s LibriVox excerpts, but their centroids at cosine 0.59 and up, so the merge takes them; two voices (7 s + 7 s of two readers): silhouette 0.59 and up,
+# cosine 0.18 at most; the two such phone calls: silhouette 0.38 and 0.49, and merging at cosine 0.4 already
+# made one of them a single speaker.
+SHORT_WINDOWS = 20
+SHORT_SIL_MIN = 0.33
+SHORT_MERGE_COS = 0.5
 SIL_MAX_N = 2000   # silhouette on at most this many windows (even stride): a 2-h call has ~8k, n x n would be ~0.5 GB
 
 
@@ -110,8 +122,28 @@ def silhouette(e: np.ndarray, lab: np.ndarray) -> float:
     return float(s.mean())
 
 
+def merge_close(e: np.ndarray, lab: np.ndarray, cos_min: float) -> np.ndarray:
+    """Labels 0..m-1 after merging the closest pair of clusters while their centroid cosine is >= cos_min."""
+    lab = lab.copy()
+    while True:
+        ids = np.unique(lab)
+        if len(ids) < 2:
+            break
+        c = np.stack([e[lab == i].mean(0) for i in ids])
+        c /= np.maximum(np.linalg.norm(c, axis=1, keepdims=True), 1e-12)
+        s = c @ c.T
+        np.fill_diagonal(s, -np.inf)
+        a, b = np.unravel_index(s.argmax(), s.shape)
+        if s[a, b] < cos_min:
+            break
+        lab[lab == ids[b]] = ids[a]
+    return np.unique(lab, return_inverse=True)[1]
+
+
 def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
-    """Cluster label per row; k in 2..max_k by best mean cosine silhouette, k = 1 if that is below SIL_MIN."""
+    """Cluster label per row; k in 2..max_k by best mean cosine silhouette, k = 1 if that is below SIL_MIN
+    (SHORT_SIL_MIN under SHORT_WINDOWS rows), then clusters with centroid cosine >= MERGE_COS (SHORT_MERGE_COS)
+    merged."""
     if len(emb) < MIN_WINDOWS:
         return np.zeros(len(emb), int)
     e = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
@@ -121,9 +153,10 @@ def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
         sil = silhouette(e, lab)
         if sil > best_sil:
             best_sil, best = sil, lab
-    if best is None or best_sil < SIL_MIN:
+    short = len(e) < SHORT_WINDOWS
+    if best is None or best_sil < (SHORT_SIL_MIN if short else SIL_MIN):
         return np.zeros(len(emb), int)
-    return best
+    return merge_close(e, best, SHORT_MERGE_COS if short else MERGE_COS)
 
 
 def join(pieces):
@@ -198,7 +231,7 @@ def first_speech_names(labels: dict[int, tuple[str | None, str | None]], segment
 
 def diarize(extractor, audio: np.ndarray, segments: list[dict]) -> tuple[list[dict], dict[str, dict]]:
     """Segments with `speaker` / `speaker_flag`, and {SPEAKER_xx: {speech_s, embedding}}; the speaker count is picked
-    by silhouette. No segments with text: ([], {}) or the segments unlabelled."""
+    by silhouette and centroid merge (choose_labels). No segments with text: ([], {}) or the segments unlabelled."""
     spans = {i: (s["s"], s["e"]) for i, s in enumerate(segments) if s["text"].strip()}
     wins = windows(spans, len(audio) / SR)
     emb = embed(extractor, audio, wins) if wins else np.zeros((0, extractor.dim), np.float32)

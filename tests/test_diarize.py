@@ -60,6 +60,39 @@ def test_short_call_one_speaker(dim):
     assert choose_labels(emb[:3]).tolist() == [0, 0, 0]
 
 
+
+def _clouds(centers, sizes, noise, seed=1):
+    """Rows around the given centres (unit vectors), noise scaled to the dimension as in _blobs."""
+    rng = np.random.default_rng(seed)
+    noise = noise * np.sqrt(192 / centers.shape[1])
+    emb = np.concatenate([c + noise * rng.standard_normal((n, len(c))) for c, n in zip(centers, sizes)])
+    return emb / np.linalg.norm(emb, axis=1, keepdims=True), np.repeat(np.arange(len(sizes)), sizes)
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_one_voice_two_close_clouds_merged(dim):
+    """A long one-voice recording that k-means splits in two tight clouds, centroid cosine 0.9: silhouette ~0.8, so
+    only the centroid merge (MERGE_COS) makes it one speaker (LibriVox chapters split this way, cosine 0.89-0.94)."""
+    a, b = np.eye(dim)[0] + 0.23 * np.eye(dim)[1], np.eye(dim)[0] - 0.23 * np.eye(dim)[1]
+    emb, _ = _clouds(np.stack([a, b]) / np.linalg.norm(a), [40, 40], noise=0.01)
+    assert len(set(choose_labels(emb).tolist())) == 1
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_short_recording_odd_windows_one_speaker(dim):
+    """14 windows, 3 of them off to the side (centroid cosine ~0.3, silhouette 0.2-0.25): one voice on a short
+    recording, as on the 19-s "Me at the zoo"; with SIL_MIN alone it was two."""
+    o = np.eye(dim)[0] + 2 * np.eye(dim)[1]
+    emb, _ = _clouds(np.stack([np.eye(dim)[0], o / np.linalg.norm(o)]), [11, 3], noise=0.1)
+    assert len(set(choose_labels(emb).tolist())) == 1
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_short_recording_two_voices(dim):
+    emb, truth = _clouds(np.eye(dim)[:2], [8, 8], noise=0.05)
+    lab = choose_labels(emb)
+    assert len(set(lab.tolist())) == 2 and _same_partition(lab, truth)
+
 class FakeStream:
     def accept_waveform(self, sr, samples):
         self.samples = np.asarray(samples, np.float32)
