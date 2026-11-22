@@ -48,7 +48,14 @@ VAD = Model(
     archive=False,
 )
 
-SPEAKER: Model | None = None  # заполняется в задаче диаризации
+SPEAKER = Model(
+    name="nemo-titanet-small",
+    url=f"{_BASE}/speaker-recongition-models/nemo_en_titanet_small.onnx",
+    sha256="ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",
+    size=40257283,
+    files=("nemo_en_titanet_small.onnx",),
+    archive=False,
+)
 
 
 def cache_dir() -> Path:
