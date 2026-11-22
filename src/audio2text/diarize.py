@@ -18,18 +18,21 @@ MIN_WINDOWS = 4
 NEAREST_S = 2.0
 MIXED_SHARE = 0.8
 SIL_MIN = 0.1   # best silhouette below this: one speaker
-# One voice still splits: k-means cuts a long one-voice recording in two clouds whose centroids are close
-# (cosine 0.89-0.94 on five LibriVox readers), with a silhouette up to 0.24. Two different people stay far apart:
-# at most 0.69 over 145 two-person phone calls, at most 0.21 on 10 pairs of LibriVox readers. Merged above this.
-MERGE_COS = 0.8
-# Short recordings (under SHORT_WINDOWS windows, ~15 s of speech): each phrase can form its own cluster, since
-# neighbouring windows overlap by half. One voice: best silhouette up to 0.28 on the 19-s "Me at the zoo"; up to 0.36
-# on 15-s LibriVox excerpts, but their centroids at cosine 0.59 and up, so the merge takes them; two voices (7 s + 7 s of two readers): silhouette 0.59 and up,
-# cosine 0.18 at most; the two such phone calls: silhouette 0.38 and 0.49, and merging at cosine 0.4 already
-# made one of them a single speaker.
+# One voice still splits: k-means cuts a one-voice recording in two clouds whose centroids are close, with a silhouette
+# above SIL_MIN. Centroid cosine of such a split on five LibriVox readers: 0.89-0.94 on whole chapters, 0.81 and up
+# on 45-s excerpts. Two people stay apart: at most 0.69 over 145 two-person phone calls (0.66 on calls of 40-79
+# windows), at most 0.21 on 10 pairs of LibriVox readers. Merged from MERGE_COS.
+MERGE_COS = 0.75
+# Shorter recordings split more and less cleanly. Under SHORT_MERGE_WINDOWS windows (~30 s of speech) the merge
+# starts at SHORT_MERGE_COS: one-voice splits of 15-30 s excerpts are at cosine 0.59 and up; two-person phone calls
+# of 20-39 windows at most 0.52; 7 s + 7 s of two readers at most 0.18.
+SHORT_MERGE_WINDOWS = 40
+SHORT_MERGE_COS = 0.55
+# Under SHORT_WINDOWS windows (~15 s of speech) each phrase can form its own cluster, since neighbouring windows
+# overlap by half: best silhouette up to 0.28 on the 19-s one-voice "Me at the zoo", with centroids too far apart to
+# merge. Two voices there: 0.59 and up on 7 s + 7 s of two readers, 0.38 and up on the phone calls under 20 windows.
 SHORT_WINDOWS = 20
 SHORT_SIL_MIN = 0.33
-SHORT_MERGE_COS = 0.5
 SIL_MAX_N = 2000   # silhouette on at most this many windows (even stride): a 2-h call has ~8k, n x n would be ~0.5 GB
 
 
@@ -142,8 +145,8 @@ def merge_close(e: np.ndarray, lab: np.ndarray, cos_min: float) -> np.ndarray:
 
 def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
     """Cluster label per row; k in 2..max_k by best mean cosine silhouette, k = 1 if that is below SIL_MIN
-    (SHORT_SIL_MIN under SHORT_WINDOWS rows), then clusters with centroid cosine >= MERGE_COS (SHORT_MERGE_COS)
-    merged."""
+    (SHORT_SIL_MIN under SHORT_WINDOWS rows), then clusters with centroid cosine >= MERGE_COS merged
+    (SHORT_MERGE_COS under SHORT_MERGE_WINDOWS rows)."""
     if len(emb) < MIN_WINDOWS:
         return np.zeros(len(emb), int)
     e = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
@@ -153,10 +156,9 @@ def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
         sil = silhouette(e, lab)
         if sil > best_sil:
             best_sil, best = sil, lab
-    short = len(e) < SHORT_WINDOWS
-    if best is None or best_sil < (SHORT_SIL_MIN if short else SIL_MIN):
+    if best is None or best_sil < (SHORT_SIL_MIN if len(e) < SHORT_WINDOWS else SIL_MIN):
         return np.zeros(len(emb), int)
-    return merge_close(e, best, SHORT_MERGE_COS if short else MERGE_COS)
+    return merge_close(e, best, SHORT_MERGE_COS if len(e) < SHORT_MERGE_WINDOWS else MERGE_COS)
 
 
 def join(pieces):

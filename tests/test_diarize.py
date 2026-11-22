@@ -88,6 +88,15 @@ def test_short_recording_odd_windows_one_speaker(dim):
 
 
 @pytest.mark.parametrize("dim", DIMS)
+def test_half_minute_one_voice_merged_at_lower_cosine(dim):
+    """30 windows (~25 s): a one-voice split at centroid cosine 0.65 is merged (SHORT_MERGE_COS), though on a long
+    recording it would stay two (MERGE_COS)."""
+    t = 0.46   # cosine (1 - t^2) / (1 + t^2) = 0.65
+    a, b = np.eye(dim)[0] + t * np.eye(dim)[1], np.eye(dim)[0] - t * np.eye(dim)[1]
+    emb, _ = _clouds(np.stack([a, b]) / np.linalg.norm(a), [15, 15], noise=0.02)
+    assert len(set(choose_labels(emb).tolist())) == 1
+
+@pytest.mark.parametrize("dim", DIMS)
 def test_short_recording_two_voices(dim):
     emb, truth = _clouds(np.eye(dim)[:2], [8, 8], noise=0.05)
     lab = choose_labels(emb)
