@@ -58,8 +58,13 @@ SPEAKER = Model(
 )
 
 
+def cache_root() -> Path:
+    """Корень кэша (модели и рабочие папки); AUDIO2TEXT_CACHE переопределяет папку пользователя."""
+    return Path(os.environ.get("AUDIO2TEXT_CACHE") or platformdirs.user_cache_dir("audio2text"))
+
+
 def cache_dir() -> Path:
-    return Path(platformdirs.user_cache_dir("audio2text")) / "models"
+    return cache_root() / "models"
 
 
 def _sha256(path: Path) -> str:

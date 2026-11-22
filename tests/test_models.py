@@ -151,3 +151,13 @@ def test_ensure_truncated_always_keeps_part(tmp_path: Path, serve):
     assert "прервана" in str(e.value)
     part = tmp_path / "m" / "m.bin.part"
     assert part.exists() and 0 < part.stat().st_size < len(data)
+
+
+def test_cache_env_override(tmp_path: Path, monkeypatch):
+    from audio2text import cli
+
+    monkeypatch.setenv("AUDIO2TEXT_CACHE", str(tmp_path / "c"))
+    assert models.cache_dir() == tmp_path / "c" / "models"
+    assert cli.work_root() == tmp_path / "c" / "work"
+    monkeypatch.delenv("AUDIO2TEXT_CACHE")
+    assert models.cache_dir().name == "models" and "audio2text" in str(models.cache_dir())

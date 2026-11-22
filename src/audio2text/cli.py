@@ -12,14 +12,12 @@ import sys
 import traceback
 from pathlib import Path
 
-import platformdirs
-
-from . import pipeline, sources
+from . import models, pipeline, sources
 from .markdown import write
 
 
 def work_root() -> Path:
-    return Path(platformdirs.user_cache_dir("audio2text")) / "work"
+    return models.cache_root() / "work"
 
 
 def work_dir(source: str, out: Path | None) -> Path:

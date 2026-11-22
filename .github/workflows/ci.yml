@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      AUDIO2TEXT_CACHE: ${{ github.workspace }}/.a2t-cache
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.a2t-cache/models
+          key: models-${{ runner.os }}-${{ hashFiles('src/audio2text/models.py') }}
+
+      - name: Tests (with real models)
+        env:
+          PYTHONUTF8: "1"
+        run: uv run pytest -v
+
+      - name: Install as a tool
+        run: |
+          uv tool install .
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Smoke - local file
+        run: |
+          audio2text tests/data/sample.wav out.md
+          cat out.md
+          grep -q "SPEAKER_" out.md
+
+      - name: Smoke - YouTube (deno path)
+        continue-on-error: true
+        run: |
+          audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr yt.md
+          cat yt.md
+          grep -q "SPEAKER_" yt.md
