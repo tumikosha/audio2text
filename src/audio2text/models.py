@@ -147,13 +147,30 @@ def _extract(archive: Path, dest: Path, files: tuple[str, ...]) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _present(model: Model, cache: Path | None) -> bool:
+    folder = (cache or cache_dir()) / model.name
+    return all((folder / f).is_file() for f in model.files)
+
+
+def _size_text(n: int) -> str:
+    return f"{n / 1e9:.1f} ГБ" if n >= 1e9 else f"{n / 1e6:.0f} МБ"
+
+
+def ensure_all(models_list: list[Model], cache: Path | None = None, log=print) -> list[Path]:
+    """Папки всех моделей; перед первой загрузкой один раз пишет общий размер недостающих."""
+    missing = sum(m.size for m in models_list if not _present(m, cache))
+    if missing:
+        log(f"скачиваю модели: {_size_text(missing)}, один раз")
+    return [ensure(m, cache, log=lambda *_: None) for m in models_list]
+
+
 def ensure(model: Model, cache: Path | None = None, log=print) -> Path:
     """Папка с файлами модели; качает, если их нет."""
     folder = (cache or cache_dir()) / model.name
-    if all((folder / f).is_file() for f in model.files):
+    if _present(model, cache):
         return folder
     folder.mkdir(parents=True, exist_ok=True)
-    log(f"скачиваю модели: {model.size / 1e9:.1f} ГБ, один раз")
+    log(f"скачиваю модели: {_size_text(model.size)}, один раз")
     fname = Path(urlparse(model.url).path).name
     final = folder / fname
     part = folder / (fname + ".part")

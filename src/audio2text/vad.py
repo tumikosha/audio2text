@@ -16,6 +16,7 @@ def _detector(vad_dir: Path, threshold: float, min_silence: float, max_len: floa
     cfg.silero_vad.threshold = threshold
     cfg.silero_vad.min_silence_duration = min_silence
     cfg.silero_vad.min_speech_duration = 0.25
+    # длинная речь без пауз режется детектором: ни один участок не длиннее того, что берёт ASR
     cfg.silero_vad.max_speech_duration = max_len
     cfg.sample_rate = SR
     return sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=60)
@@ -43,10 +44,15 @@ def vad_chunks(audio: np.ndarray, vad_dir: Path, max_gap=0.8, max_len=30.0, thre
     drain()
 
     chunks: list[list[float]] = []
-    for a, b in spans:
-        a, b = max(0.0, a - PAD), min(total, b + PAD)
+    prev_end = 0.0  # конец предыдущего участка без отступа
+    for s, e in spans:
+        a, b = max(0.0, s - PAD), min(total, e + PAD)
         if chunks and a - chunks[-1][1] <= max_gap and b - chunks[-1][0] <= max_len:
             chunks[-1][1] = b
         else:
+            if chunks and a < chunks[-1][1]:  # пауза короче 2*PAD: делим её пополам, как speech_pad_ms у silero
+                mid = (prev_end + s) / 2
+                chunks[-1][1] = a = mid
             chunks.append([a, b])
+        prev_end = e
     return chunks

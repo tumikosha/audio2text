@@ -82,6 +82,15 @@ def test_vad_chunks_merge_and_cap(monkeypatch, tmp_path):
     assert sum(vad.vad_chunks(audio, tmp_path, max_len=2.0), []) == pytest.approx([0, 1.2, 1.3, 2.7])
 
 
+def test_vad_chunks_never_overlap(monkeypatch, tmp_path):
+    # forced split at max_len: the 0.1 s gap is shorter than 2*PAD, split at its midpoint
+    _fake_vad(monkeypatch, [(0, 30), (30.1, 40)])
+    got = vad.vad_chunks(np.zeros(41 * SR, np.float32), tmp_path, max_len=30.0)
+    assert len(got) == 2
+    assert got[0][1] <= got[1][0]
+    assert got[0][1] == pytest.approx(30.05) and got[1][0] == pytest.approx(30.05)
+
+
 def test_vad_pad_clipped_to_audio(monkeypatch, tmp_path):
     _fake_vad(monkeypatch, [(0.1, 0.9)])
     got = vad.vad_chunks(np.zeros(1 * SR, np.float32), tmp_path)

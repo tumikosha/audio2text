@@ -58,6 +58,15 @@ def test_title_name():
     assert sources.title_name("???") == "transcript"
 
 
+def test_title_name_windows_reserved():
+    for t in ("con", "NUL", "Com1", "lpt1", "prn"):
+        assert sources.title_name(t) == t + "_"
+    assert sources.title_name("con.txt") == "con_.txt"
+    assert sources.title_name("AUX.tar.gz") == "AUX_.tar.gz"
+    assert sources.title_name("console") == "console"
+    assert sources.title_name("com10") == "com10"
+
+
 def test_is_url():
     assert sources.is_url("https://youtu.be/x") and not sources.is_url("a.mp3")
 
@@ -122,6 +131,23 @@ def test_download_passes_ffmpeg_and_no_playlist(tmp_path, monkeypatch):
     assert p.name == "src.m4a" and "--no-playlist" in seen[0]
     assert seen[0][seen[0].index("--ffmpeg-location") + 1] == "/f/ffmpeg"
     assert sources.download("u", tmp_path) == p and len(seen) == 1
+
+
+def test_download_ignores_unfinished_fragments(tmp_path, monkeypatch):
+    d = tmp_path / "download"
+    d.mkdir()
+    for n in ("src.webm.part-Frag3", "src.webm.part", "src.webm.ytdl", "src.webm.temp"):
+        (d / n).write_bytes(b"x")
+    seen = []
+
+    def fake(args):
+        seen.append(args)
+        (d / "src.webm").write_bytes(b"x")
+        return ""
+    monkeypatch.setattr(sources, "_run", fake)
+    monkeypatch.setattr(sources, "ffmpeg_exe", lambda: "/f/ffmpeg")
+    assert sources.download("u", tmp_path).name == "src.webm"
+    assert len(seen) == 1
 
 
 def test_run_forces_utf8(monkeypatch):

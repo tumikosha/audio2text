@@ -119,22 +119,34 @@ def captions_doc(url: str, info: dict, track: str, kind: str, work: Path) -> dic
             "audio_s": info.get("duration"), "speakers": {}, "segments": segs}
 
 
+def _finished(p: Path) -> bool:
+    """Готовый файл загрузки, а не фрагмент или служебный файл yt-dlp (.part, .part-Frag3, .ytdl, .temp)."""
+    return p.is_file() and ".part" not in p.name and not p.name.endswith((".ytdl", ".temp"))
+
+
 def download(url: str, work: Path) -> Path:
     """Лучшее аудио <url> в <work>/download/; прежняя загрузка переиспользуется."""
     d = work / "download"
-    done = [p for p in sorted(d.glob("*")) if p.is_file() and not p.name.endswith((".part", ".ytdl"))] if d.exists() else []
+    done = [p for p in sorted(d.glob("*")) if _finished(p)] if d.exists() else []
     if done:
         return done[0]
     d.mkdir(parents=True, exist_ok=True)
     print(f"скачиваю {url}", flush=True)
     _run(["-f", "bestaudio/best", "--no-playlist", "--ffmpeg-location", ffmpeg_exe(),
           "-o", str(d / "src.%(ext)s"), url])
-    files = [p for p in sorted(d.glob("src.*")) if not p.name.endswith((".part", ".ytdl"))]
+    files = [p for p in sorted(d.glob("src.*")) if _finished(p)]
     if not files:
         raise SystemExit(f"yt-dlp ничего не скачал: {url}")
     return files[0]
 
 
+_RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)", re.IGNORECASE)
+
+
 def title_name(title: str) -> str:
-    """Имя файла из названия видео: без символов путей и shell, до 120 знаков."""
-    return re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip(" .")[:120].strip() or "transcript"
+    """Имя файла из названия видео: без символов путей и shell, до 120 знаков; зарезервированные
+    в Windows имена (con, nul, com1, lpt1...) получают "_" после имени: "con" -> "con_", "nul.txt" -> "nul_.txt"
+    (Windows проверяет часть до первой точки, поэтому "_" в конце "nul.txt_" не помог бы)."""
+    name = re.sub(r'[\\/:*?"<>|\s]+', " ", title).strip(" .")[:120].strip() or "transcript"
+    m = _RESERVED.match(name)
+    return f"{m.group(1)}_{name[m.end(1):]}" if m else name

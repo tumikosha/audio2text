@@ -30,7 +30,7 @@ def transcribe_file(path: Path, log=print) -> dict:
     не медиафайл падает сразу, без скачивания 0.5 ГБ."""
     audio = media.load_audio(path)
     dur = len(audio) / media.SR
-    asr_dir, vad_dir, spk_dir = (models.ensure(m, log=log) for m in (models.ASR, models.VAD, models.SPEAKER))
+    asr_dir, vad_dir, spk_dir = models.ensure_all([models.ASR, models.VAD, models.SPEAKER], log=log)
     n = asr.threads()
     rec = asr.load_recognizer(asr_dir, n)
     extractor = diarize.load_extractor(spk_dir, n)

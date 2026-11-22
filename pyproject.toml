@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "Аудиофайл или ссылка YouTube в Markdown с говорящими, локально (sherpa-onnx)"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "sherpa-onnx",
-    "numpy",
-    "imageio-ffmpeg",
-    "platformdirs",
+    "sherpa-onnx>=2.0.3,<3",
+    "numpy>=2,<3",
+    "imageio-ffmpeg>=0.5,<1",
+    "platformdirs>=4,<5",
 ]
 
 [project.scripts]

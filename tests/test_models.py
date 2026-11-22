@@ -85,6 +85,35 @@ def test_ensure_downloads_and_verifies(tmp_path: Path, serve):
     assert len(s.requests) == n
 
 
+def test_ensure_all_one_message_then_downloads(tmp_path: Path, serve):
+    a, b = b"a" * 3000, b"b" * 2000
+    ma, mb = _model(serve(a).url, a), _model(serve(b).url, b)
+    ma, mb = Model(**{**ma.__dict__, "name": "ma"}), Model(**{**mb.__dict__, "name": "mb"})
+    logs = []
+    folders = models.ensure_all([ma, mb], tmp_path, log=logs.append)
+    assert folders == [tmp_path / "ma", tmp_path / "mb"]
+    assert (folders[0] / "m.bin").read_bytes() == a and (folders[1] / "m.bin").read_bytes() == b
+    assert len(logs) == 1 and logs[0].startswith("скачиваю модели: ")
+    logs.clear()
+    assert models.ensure_all([ma, mb], tmp_path, log=logs.append) == folders
+    assert logs == []
+
+
+def test_ensure_all_sums_only_missing(tmp_path: Path, monkeypatch):
+    logs = []
+    monkeypatch.setattr(models, "ensure", lambda m, cache=None, log=print: tmp_path / m.name)
+    big = Model(name="a", url="u", sha256="", size=1_500_000_000, files=("x",), archive=False)
+    small = Model(name="b", url="u", sha256="", size=40_257_283, files=("x",), archive=False)
+    cached = Model(name="c", url="u", sha256="", size=9_000_000_000, files=("x",), archive=False)
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "x").write_bytes(b"")
+    models.ensure_all([big, small, cached], tmp_path, log=logs.append)
+    assert logs == ["скачиваю модели: 1.5 ГБ, один раз"]
+    logs.clear()
+    models.ensure_all([small, cached], tmp_path, log=logs.append)
+    assert logs == ["скачиваю модели: 40 МБ, один раз"]
+
+
 def test_ensure_bad_sha_rejected(tmp_path: Path, serve):
     s = serve(b"other bytes!")
     m = _model(s.url, b"expected")
