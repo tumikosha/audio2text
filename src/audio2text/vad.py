@@ -8,6 +8,9 @@ import sherpa_onnx
 from .media import SR
 
 PAD = 0.2  # как speech_pad_ms=200 у silero-vad
+# порог речи: при 0.5 на тихих и сжатых записях (aac YouTube, «Me at the zoo») терялась половина фраз;
+# 0.35 их возвращает, а на фильме без речи (Big Buck Bunny, 10 мин) лишнего текста — те же 3–6 междометий
+THRESHOLD = 0.35
 
 
 def _detector(vad_dir: Path, threshold: float, min_silence: float, max_len: float):
@@ -22,7 +25,7 @@ def _detector(vad_dir: Path, threshold: float, min_silence: float, max_len: floa
     return sherpa_onnx.VoiceActivityDetector(cfg, buffer_size_in_seconds=60)
 
 
-def vad_chunks(audio: np.ndarray, vad_dir: Path, max_gap=0.8, max_len=30.0, threshold=0.5,
+def vad_chunks(audio: np.ndarray, vad_dir: Path, max_gap=0.8, max_len=30.0, threshold=THRESHOLD,
                min_silence=0.5) -> list[list[float]]:
     """Речевые участки [start, end] в секундах: соседние склеиваются, пока пауза ≤ max_gap
     и участок не длиннее max_len."""
