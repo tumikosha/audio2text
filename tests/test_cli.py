@@ -120,6 +120,22 @@ def test_cli_unexpected_error_one_line(tmp_path, monkeypatch, capsys):
     assert "RuntimeError" in open(log, encoding="utf-8").read()
 
 
+def test_cli_error_log_unwritable(tmp_path, monkeypatch, capsys):
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    blocker = tmp_path / "file-not-dir"
+    blocker.write_text("")
+    monkeypatch.setattr(cli, "work_root", lambda: blocker / "work")  # mkdir under a file fails
+
+    def boom(path, log=print):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(pipeline, "transcribe_file", boom)
+    assert cli.main([str(src)]) == 1
+    err = capsys.readouterr().err.strip().splitlines()
+    assert err == ["ошибка: RuntimeError: x"]
+
+
 def test_cli_not_media(tmp_path, capsys):
     """A text file fails at decoding, before any model download."""
     src = tmp_path / "заметки.txt"

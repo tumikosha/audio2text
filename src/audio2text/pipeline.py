@@ -25,10 +25,6 @@ def head_cut(chunks: list[list[float]]) -> float | None:
     return cut
 
 
-def _shift(segs: list[dict], t: float) -> list[dict]:
-    return [{**s, "s": round(s["s"] + t, 2), "e": round(s["e"] + t, 2)} for s in segs]
-
-
 def transcribe_file(path: Path, log=print) -> dict:
     """Файл -> {"source", "transcript", "audio_s", "speakers", "segments"}. Аудио читается до загрузки моделей:
     не медиафайл падает сразу, без скачивания 0.5 ГБ."""
@@ -43,16 +39,21 @@ def transcribe_file(path: Path, log=print) -> dict:
         log(f"длительность {_hms(dur)}")
         segs = asr.transcribe(rec, audio, vad_dir)
     else:
-        cut = head_cut(vad.vad_chunks(audio, vad_dir))
+        chunks = vad.vad_chunks(audio, vad_dir)
+        vad_took = time.monotonic() - t0  # VAD всего файла: прибавляется к оценке один раз, не масштабируется
+        cut = head_cut(chunks)
         head_s = cut or HEAD_S
-        k = int(head_s * media.SR)
-        head = asr.transcribe(rec, audio[:k], vad_dir)
-        took = time.monotonic() - t0
-        log(f"длительность {_hms(dur)}, оценка ~{max(1, round(took / head_s * dur / 60))} мин")
+        t1 = time.monotonic()
         if cut:
-            segs = head + _shift(asr.transcribe(rec, audio[k:], vad_dir), k / media.SR)
-        else:  # нет паузы для разреза: замер выброшен, всё заново
-            segs = asr.transcribe(rec, audio, vad_dir)
+            head = asr.transcribe(rec, audio, vad_dir, chunks=[c for c in chunks if c[1] <= cut])
+        else:  # нет паузы для разреза: замер на первых HEAD_S с, потом всё заново
+            asr.transcribe(rec, audio[:int(HEAD_S * media.SR)], vad_dir)
+        took = time.monotonic() - t1
+        log(f"длительность {_hms(dur)}, оценка ~{max(1, round((took / head_s * dur + vad_took) / 60))} мин")
+        if cut:
+            segs = head + asr.transcribe(rec, audio, vad_dir, chunks=[c for c in chunks if c[0] >= cut])
+        else:
+            segs = asr.transcribe(rec, audio, vad_dir, chunks=chunks)
     log(f"распознано за {_hms(time.monotonic() - t0)}, определяю говорящих")
     segs, speakers = diarize.diarize(extractor, audio, segs)
     log(f"готово за {_hms(time.monotonic() - t0)}")

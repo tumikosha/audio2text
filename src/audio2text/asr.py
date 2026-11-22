@@ -40,10 +40,12 @@ def sentences(result, dur: float) -> list[tuple[float, float, str]]:
     return out
 
 
-def transcribe(rec, audio: np.ndarray, vad_dir: Path, max_len: float = 30.0) -> list[dict]:
-    """Сегменты {"s","e","text"} по всему аудио; время от его начала. За раз декодируется один кусок VAD."""
+def transcribe(rec, audio: np.ndarray, vad_dir: Path, max_len: float = 30.0,
+               chunks: list[list[float]] | None = None) -> list[dict]:
+    """Сегменты {"s","e","text"} по всему аудио; время от его начала. За раз декодируется один кусок VAD.
+    chunks — готовые куски VAD [start, end] (секунды от начала audio); None — VAD запускается здесь."""
     segs = []
-    for s, e in vad_chunks(audio, vad_dir, max_len=max_len):
+    for s, e in vad_chunks(audio, vad_dir, max_len=max_len) if chunks is None else chunks:
         st = rec.create_stream()
         st.accept_waveform(SR, audio[int(s * SR):int(e * SR)])
         rec.decode_streams([st])

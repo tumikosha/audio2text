@@ -85,10 +85,14 @@ def main(argv: list[str] | None = None) -> int:
         print("прервано", file=sys.stderr, flush=True)
         return 130
     except Exception as e:
-        work = work or work_root()
-        work.mkdir(parents=True, exist_ok=True)
-        log = work / "error.log"
-        log.write_text(traceback.format_exc(), encoding="utf-8")
-        text = " ".join(str(e).split())
-        print(f"ошибка: {type(e).__name__}: {text} (подробности: {log})", file=sys.stderr, flush=True)
+        text = f"ошибка: {type(e).__name__}: {' '.join(str(e).split())}"
+        try:
+            work = work or work_root()
+            work.mkdir(parents=True, exist_ok=True)
+            log = work / "error.log"
+            log.write_text(traceback.format_exc(), encoding="utf-8")
+            text += f" (подробности: {log})"
+        except Exception:  # журнал не записать (кэш недоступен): одна строка без пути
+            pass
+        print(text, file=sys.stderr, flush=True)
         return 1

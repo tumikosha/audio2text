@@ -100,3 +100,12 @@ def test_transcribe_public_sample(vad_dir, asr_dir, sample_wav):
     segs = asr.transcribe(rec, load_audio(sample_wav), vad_dir)
     assert segs
     assert all(s["text"] and 0 <= s["s"] < s["e"] for s in segs)
+
+
+def test_transcribe_given_chunks_skips_vad(monkeypatch, tmp_path):
+    def no_vad(*a, **k):
+        raise AssertionError("VAD must not run")
+
+    monkeypatch.setattr(asr, "vad_chunks", no_vad)
+    segs = asr.transcribe(FakeRec(), np.zeros(14 * SR, np.float32), tmp_path, chunks=[[10.0, 12.0]])
+    assert segs == [{"s": 10.0, "e": 12.0, "text": "hi."}]
