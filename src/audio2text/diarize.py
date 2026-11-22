@@ -23,16 +23,20 @@ SIL_MIN = 0.1   # best silhouette below this: one speaker
 # on 45-s excerpts. Two people stay apart: at most 0.69 over 145 two-person phone calls (0.66 on calls of 40-79
 # windows), at most 0.21 on 10 pairs of LibriVox readers. Merged from MERGE_COS.
 MERGE_COS = 0.75
-# Shorter recordings split more and less cleanly. Under SHORT_MERGE_WINDOWS windows (~30 s of speech) the merge
-# starts at SHORT_MERGE_COS: one-voice splits of 15-30 s excerpts are at cosine 0.59 and up; two-person phone calls
-# of 20-39 windows at most 0.52; 7 s + 7 s of two readers at most 0.18.
-SHORT_MERGE_WINDOWS = 40
-SHORT_MERGE_COS = 0.55
+# Shorter recordings split more and less cleanly. Under MID_WINDOWS windows (~30 s of speech) the merge starts at
+# MID_MERGE_COS. One-voice 17-30 s excerpts: the first merge is at cosine 0.68 and up, but small leftover clusters of
+# 2 windows join at 0.60, and a threshold of 0.6 left two of 40 excerpts split. Two-person phone calls of 20-39
+# windows: at most 0.52. The threshold is midway between 0.52 and 0.60.
+MID_WINDOWS = 40
+MID_MERGE_COS = 0.56
 # Under SHORT_WINDOWS windows (~15 s of speech) each phrase can form its own cluster, since neighbouring windows
 # overlap by half: best silhouette up to 0.28 on the 19-s one-voice "Me at the zoo", with centroids too far apart to
 # merge. Two voices there: 0.59 and up on 7 s + 7 s of two readers, 0.38 and up on the phone calls under 20 windows.
+# The merge starts at SHORT_MERGE_COS: one-voice splits of 15-s excerpts at cosine 0.59 and up, 7 s + 7 s of two
+# readers at most 0.18; on the phone calls under 20 windows merging at 0.4 already made one a single speaker.
 SHORT_WINDOWS = 20
 SHORT_SIL_MIN = 0.33
+SHORT_MERGE_COS = 0.55
 SIL_MAX_N = 2000   # silhouette on at most this many windows (even stride): a 2-h call has ~8k, n x n would be ~0.5 GB
 
 
@@ -146,7 +150,7 @@ def merge_close(e: np.ndarray, lab: np.ndarray, cos_min: float) -> np.ndarray:
 def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
     """Cluster label per row; k in 2..max_k by best mean cosine silhouette, k = 1 if that is below SIL_MIN
     (SHORT_SIL_MIN under SHORT_WINDOWS rows), then clusters with centroid cosine >= MERGE_COS merged
-    (SHORT_MERGE_COS under SHORT_MERGE_WINDOWS rows)."""
+    (MID_MERGE_COS under MID_WINDOWS rows, SHORT_MERGE_COS under SHORT_WINDOWS)."""
     if len(emb) < MIN_WINDOWS:
         return np.zeros(len(emb), int)
     e = emb / np.maximum(np.linalg.norm(emb, axis=1, keepdims=True), 1e-12)
@@ -156,9 +160,11 @@ def choose_labels(emb: np.ndarray, max_k: int = 4) -> np.ndarray:
         sil = silhouette(e, lab)
         if sil > best_sil:
             best_sil, best = sil, lab
-    if best is None or best_sil < (SHORT_SIL_MIN if len(e) < SHORT_WINDOWS else SIL_MIN):
-        return np.zeros(len(emb), int)
-    return merge_close(e, best, SHORT_MERGE_COS if len(e) < SHORT_MERGE_WINDOWS else MERGE_COS)
+    n = len(e)
+    if best is None or best_sil < (SHORT_SIL_MIN if n < SHORT_WINDOWS else SIL_MIN):
+        return np.zeros(n, int)
+    return merge_close(e, best, SHORT_MERGE_COS if n < SHORT_WINDOWS else MID_MERGE_COS if n < MID_WINDOWS
+                       else MERGE_COS)
 
 
 def join(pieces):

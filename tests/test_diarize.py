@@ -60,7 +60,6 @@ def test_short_call_one_speaker(dim):
     assert choose_labels(emb[:3]).tolist() == [0, 0, 0]
 
 
-
 def _clouds(centers, sizes, noise, seed=1):
     """Rows around the given centres (unit vectors), noise scaled to the dimension as in _blobs."""
     rng = np.random.default_rng(seed)
@@ -69,13 +68,31 @@ def _clouds(centers, sizes, noise, seed=1):
     return emb / np.linalg.norm(emb, axis=1, keepdims=True), np.repeat(np.arange(len(sizes)), sizes)
 
 
+def _pair(dim, cos):
+    """Two unit vectors in the first two coordinates with the given cosine between them."""
+    t = np.sqrt((1 - cos) / (1 + cos))   # cosine of e0 + t e1 and e0 - t e1 is (1 - t^2) / (1 + t^2)
+    a, b = np.eye(dim)[0] + t * np.eye(dim)[1], np.eye(dim)[0] - t * np.eye(dim)[1]
+    return np.stack([a, b]) / np.linalg.norm(a)
+
+
+def _count(emb):
+    return len(set(choose_labels(emb).tolist()))
+
+
 @pytest.mark.parametrize("dim", DIMS)
 def test_one_voice_two_close_clouds_merged(dim):
     """A long one-voice recording that k-means splits in two tight clouds, centroid cosine 0.9: silhouette ~0.8, so
     only the centroid merge (MERGE_COS) makes it one speaker (LibriVox chapters split this way, cosine 0.89-0.94)."""
-    a, b = np.eye(dim)[0] + 0.23 * np.eye(dim)[1], np.eye(dim)[0] - 0.23 * np.eye(dim)[1]
-    emb, _ = _clouds(np.stack([a, b]) / np.linalg.norm(a), [40, 40], noise=0.01)
-    assert len(set(choose_labels(emb).tolist())) == 1
+    emb, _ = _clouds(_pair(dim, 0.9), [40, 40], noise=0.01)
+    assert _count(emb) == 1
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_long_recording_two_voices_at_cosine_065(dim):
+    """50 windows, centroid cosine 0.65: below MERGE_COS, two speakers."""
+    emb, truth = _clouds(_pair(dim, 0.65), [25, 25], noise=0.02)
+    lab = choose_labels(emb)
+    assert len(set(lab.tolist())) == 2 and _same_partition(lab, truth)
 
 
 @pytest.mark.parametrize("dim", DIMS)
@@ -84,23 +101,39 @@ def test_short_recording_odd_windows_one_speaker(dim):
     recording, as on the 19-s "Me at the zoo"; with SIL_MIN alone it was two."""
     o = np.eye(dim)[0] + 2 * np.eye(dim)[1]
     emb, _ = _clouds(np.stack([np.eye(dim)[0], o / np.linalg.norm(o)]), [11, 3], noise=0.1)
-    assert len(set(choose_labels(emb).tolist())) == 1
+    assert _count(emb) == 1
 
-
-@pytest.mark.parametrize("dim", DIMS)
-def test_half_minute_one_voice_merged_at_lower_cosine(dim):
-    """30 windows (~25 s): a one-voice split at centroid cosine 0.65 is merged (SHORT_MERGE_COS), though on a long
-    recording it would stay two (MERGE_COS)."""
-    t = 0.46   # cosine (1 - t^2) / (1 + t^2) = 0.65
-    a, b = np.eye(dim)[0] + t * np.eye(dim)[1], np.eye(dim)[0] - t * np.eye(dim)[1]
-    emb, _ = _clouds(np.stack([a, b]) / np.linalg.norm(a), [15, 15], noise=0.02)
-    assert len(set(choose_labels(emb).tolist())) == 1
 
 @pytest.mark.parametrize("dim", DIMS)
 def test_short_recording_two_voices(dim):
     emb, truth = _clouds(np.eye(dim)[:2], [8, 8], noise=0.05)
     lab = choose_labels(emb)
     assert len(set(lab.tolist())) == 2 and _same_partition(lab, truth)
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_short_recording_two_voices_moderate_silhouette(dim):
+    """18 windows, distinct clouds with silhouette 0.43-0.47: above SHORT_SIL_MIN, two speakers."""
+    emb, truth = _clouds(np.eye(dim)[:2], [9, 9], noise=0.08)
+    lab = choose_labels(emb)
+    assert len(set(lab.tolist())) == 2 and _same_partition(lab, truth)
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_half_minute_one_voice_merged_at_lower_cosine(dim):
+    """30 windows (~25 s): a one-voice split at centroid cosine 0.65 is merged (MID_MERGE_COS), though on a long
+    recording it would stay two (MERGE_COS)."""
+    emb, _ = _clouds(_pair(dim, 0.65), [15, 15], noise=0.02)
+    assert _count(emb) == 1
+
+
+@pytest.mark.parametrize("dim", DIMS)
+def test_half_minute_two_voices_just_below_threshold(dim):
+    """30 windows, centroid cosine 0.52 (the most two-person calls of 20-39 windows reach): two speakers."""
+    emb, truth = _clouds(_pair(dim, 0.52), [15, 15], noise=0.02)
+    lab = choose_labels(emb)
+    assert len(set(lab.tolist())) == 2 and _same_partition(lab, truth)
+
 
 class FakeStream:
     def accept_waveform(self, sr, samples):
