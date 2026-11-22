@@ -6,34 +6,27 @@
 
 ## Установка
 
-Понадобится одна программа — uv. Она сама скачает Python и всё остальное.
+Откройте терминал (macOS: программа «Терминал»; Windows: «PowerShell»; Linux: любой терминал), вставьте одну
+команду и нажмите Enter.
 
-1. Откройте терминал (macOS: программа «Терминал»; Windows: «PowerShell»; Linux: любой терминал).
-2. Установите uv.
+macOS и Linux:
 
-   macOS и Linux:
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh && ~/.local/bin/uv tool install https://github.com/tumikosha/audio2text/archive/refs/heads/main.zip
+```
 
-   ```
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+Windows (PowerShell):
 
-   Windows (PowerShell):
+```
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"; & "$env:USERPROFILE\.local\bin\uv.exe" tool install https://github.com/tumikosha/audio2text/archive/refs/heads/main.zip
+```
 
-   ```
-   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-   ```
+Команда ставит uv (он сам скачает Python и всё остальное), а затем audio2text. git не нужен. Если uv уже
+установлен, команда его просто обновит.
 
-3. Закройте терминал и откройте его снова, чтобы команда `uv` появилась.
-4. Установите audio2text:
-
-   ```
-   uv tool install https://github.com/tumikosha/audio2text/archive/refs/heads/main.zip
-   ```
-
-   git не нужен: uv сам скачает архив программы с GitHub.
-
-5. Проверьте: `audio2text --help` должен показать справку. Если терминал пишет, что команда не найдена,
-   выполните `uv tool update-shell`, закройте и снова откройте терминал.
+Затем закройте терминал и откройте его снова. Проверьте: `audio2text --help` должен показать справку. Если
+терминал пишет, что команда не найдена, выполните `~/.local/bin/uv tool update-shell` (Windows:
+`& "$env:USERPROFILE\.local\bin\uv.exe" tool update-shell`), закройте и снова откройте терминал.
 
 ## Как пользоваться
 
