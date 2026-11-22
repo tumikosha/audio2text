@@ -17,8 +17,9 @@ def _fast(monkeypatch):
 
 
 class Server:
-    def __init__(self, data: bytes):
+    def __init__(self, data: bytes, truncate: str | None = None):
         self.data = data
+        self.truncate = truncate  # None | "first" | "always"
         self.requests: list[str | None] = []  # значения заголовка Range
         outer = self
 
@@ -36,6 +37,10 @@ class Server:
                 self.send_response(code)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
+                if outer.truncate == "always" or (
+                        outer.truncate == "first" and len(outer.requests) == 1):
+                    body = body[: len(body) // 2]
+                    self.close_connection = True
                 self.wfile.write(body)
 
         self.httpd = HTTPServer(("127.0.0.1", 0), H)
@@ -51,8 +56,8 @@ class Server:
 def serve():
     servers = []
 
-    def make(data: bytes) -> Server:
-        s = Server(data)
+    def make(data: bytes, truncate: str | None = None) -> Server:
+        s = Server(data, truncate)
         servers.append(s)
         return s
 
@@ -126,3 +131,23 @@ def test_ensure_archive_extracted(tmp_path: Path, serve):
     assert (folder / "a.txt").read_bytes() == b"aaa"
     assert (folder / "b.onnx").read_bytes() == b"bbb"
     assert not (folder / "m.bin").exists() and not (folder / "m.bin.part").exists()
+
+
+def test_ensure_resumes_after_truncated_body(tmp_path: Path, serve):
+    data = bytes(range(256)) * 400
+    s = serve(data, truncate="first")
+    m = _model(s.url, data)
+    folder = ensure(m, tmp_path, log=lambda *_: None)
+    assert (folder / "m.bin").read_bytes() == data
+    assert s.requests[0] is None and s.requests[1].startswith("bytes=")
+
+
+def test_ensure_truncated_always_keeps_part(tmp_path: Path, serve):
+    data = bytes(range(256)) * 400
+    s = serve(data, truncate="always")
+    m = _model(s.url, data)
+    with pytest.raises(SystemExit) as e:
+        ensure(m, tmp_path, log=lambda *_: None)
+    assert "прервана" in str(e.value)
+    part = tmp_path / "m" / "m.bin.part"
+    assert part.exists() and 0 < part.stat().st_size < len(data)

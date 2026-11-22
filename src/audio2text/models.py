@@ -93,6 +93,8 @@ def _fetch(url: str, part: Path, total: int) -> None:
                         have += len(chunk)
                         _progress(have, total)
             sys.stderr.write("\n")
+            if total and have < total:
+                raise OSError("соединение оборвано")
             return
         except urllib.error.HTTPError as e:
             if e.code == 416 and part.exists():
@@ -101,6 +103,10 @@ def _fetch(url: str, part: Path, total: int) -> None:
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             last = e
     reason = getattr(last, "reason", last)
+    if str(last) == "соединение оборвано":
+        raise SystemExit(
+            f"загрузка прервана: {url}: соединение оборвано; "
+            "повторите запуск, докачка продолжится")
     if isinstance(last, urllib.error.HTTPError):
         raise SystemExit(f"не удалось скачать модель: {url}: HTTP {last.code}")
     raise SystemExit(f"нет сети или сервер недоступен: {url}: {reason}")
