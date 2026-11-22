@@ -27,12 +27,10 @@
 4. Установите audio2text:
 
    ```
-   uv tool install git+https://github.com/tumikosha/audio2text
+   uv tool install https://github.com/tumikosha/audio2text/archive/refs/heads/main.zip
    ```
 
-   Для этой команды нужен git. Если терминал пишет, что git не найден: на Windows установите его
-   с https://git-scm.com/downloads, на macOS выполните `xcode-select --install`, на Linux поставьте пакет `git`
-   (например, `sudo apt install git`). Потом закройте и снова откройте терминал и повторите команду.
+   git не нужен: uv сам скачает архив программы с GitHub.
 
 5. Проверьте: `audio2text --help` должен показать справку. Если терминал пишет, что команда не найдена,
    выполните `uv tool update-shell`, закройте и снова откройте терминал.
@@ -93,9 +91,13 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr
 
 ## Обновление
 
+Та же команда установки с `--reinstall` скачивает свежую версию и ставит её поверх старой:
+
 ```
-uv tool upgrade audio2text
+uv tool install --reinstall https://github.com/tumikosha/audio2text/archive/refs/heads/main.zip
 ```
+
+Модели при этом заново не скачиваются.
 
 ## Если ссылки YouTube не работают
 
@@ -190,6 +192,10 @@ audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 `tests/data/sample.wav` (английская речь, один говорящий, около 4 с) — файл `test_wavs/en.wav` из пакета модели
 sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8:
 https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/test_wavs/en.wav
+
+Лицензия файла: отдельные условия для `test_wavs` в пакете не указаны. Карточка репозитория на Hugging Face
+объявляет для всего пакета CC-BY-4.0; README пакета говорит только о весах модели и коде экспорта, про записи
+в `test_wavs` в нём ничего нет. Поэтому лицензия самого файла точно не подтверждена.
 
 ## Для разработчика
 

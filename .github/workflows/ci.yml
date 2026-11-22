@@ -39,6 +39,12 @@ jobs:
           uv tool install .
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
 
+      - name: Reinstall from a zip archive (the README install form)
+        run: |
+          git archive --format=zip -o a2t.zip HEAD
+          uv tool install --reinstall ./a2t.zip
+          audio2text --help
+
       - name: Smoke - local file
         run: |
           audio2text tests/data/sample.wav out.md
