@@ -208,6 +208,20 @@ def test_long_hole_in_pieces_until_no_words():
     assert 3 + 2 * 15 <= len(words) < 3 + 3 * 30 and ts == sorted(ts) and segs[-1]["e"] <= 30.0
 
 
+def test_hole_after_token_at_zero_not_duplicated():
+    class ZeroRec(TruncRec):
+        """Unpadded: one word at 0.0 s, then nothing; padded: TruncRec."""
+
+        def decode_streams(self, streams):
+            super().decode_streams(streams)
+            if not streams[0].samples[0] == 0:
+                streams[0].result = SimpleNamespace(tokens=["▁first"], timestamps=[0.0])
+
+    segs = asr.transcribe(ZeroRec(head=None), _speech_audio(10), None, chunks=[[0.0, 10.0]])
+    words = " ".join(s["text"] for s in segs).split()
+    assert words[0] == "first" and words.count("first") == 1 and len(words) > 25
+
+
 def test_silent_hole_not_decoded():
     rec = TruncRec(head=1.0)
     audio = _speech_audio(10)

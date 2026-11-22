@@ -153,8 +153,8 @@ def _fill_holes(rec, piece: np.ndarray, res) -> SimpleNamespace:
     edges = [-0.5] + ts + [dur + 0.3]
     holes = [(a, b) for a, b in zip(edges, edges[1:]) if _speech_s(mask, a + 0.5, b - 0.3) >= HOLE_S]
     for a, b in holes:
-        ca = _quietest(piece, int((a + 0.1) * SR), int(min(a + 0.8, b) * SR)) / SR if a > 0 else 0.0
-        cb = _quietest(piece, int(max(b - 0.4, ca) * SR), int(b * SR)) / SR if b < dur else dur
+        ca = _quietest(piece, int((a + 0.1) * SR), int(min(a + 0.8, b) * SR)) / SR if a >= 0 else 0.0
+        cb = _quietest(piece, int(max(b - 0.4, ca) * SR), int(b * SR)) / SR if b <= dur else dur
         if cb - ca < MIN_SPLIT_S:
             continue
         hk, ht = _hole(rec, piece, mask, ca, cb)
