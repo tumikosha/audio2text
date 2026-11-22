@@ -10,6 +10,9 @@ from .media import SR
 from .models import asr_files
 from .vad import vad_chunks
 
+PAD_S = 0.5  # тишина по краям куска в запасном пути
+MIN_SPLIT_S = 2.0  # пустой кусок короче этого не повторяется; часть короче 2 * MIN_SPLIT_S не режется
+
 
 def threads() -> int:
     return os.cpu_count() or 1
@@ -40,15 +43,78 @@ def sentences(result, dur: float) -> list[tuple[float, float, str]]:
     return out
 
 
+def _decode(rec, piece: np.ndarray, pad: float = 0.0) -> list[tuple[float, float, str]]:
+    """sentences() одного куска; pad — тишина с обеих сторон, времена сдвинуты обратно и зажаты в кусок."""
+    dur = len(piece) / SR
+    if pad:
+        z = np.zeros(int(pad * SR), np.float32)
+        piece = np.concatenate([z, piece, z])
+    st = rec.create_stream()
+    st.accept_waveform(SR, piece)
+    rec.decode_streams([st])
+    out = []
+    for a, b, t in sentences(st.result, len(piece) / SR):
+        a, b = min(max(0.0, a - pad), dur), min(max(0.0, b - pad), dur)
+        if b > a:
+            out.append((a, b, t))
+    return out
+
+
+def _quiet_cut(piece: np.ndarray) -> int:
+    """Индекс разреза: середина самого тихого окна 0.1 с в средней половине куска."""
+    f = int(0.1 * SR)
+    lo = len(piece) // 4
+    n = (3 * len(piece) // 4 - lo) // f
+    energy = (piece[lo:lo + n * f].reshape(n, f) ** 2).mean(1)
+    return lo + int(energy.argmin()) * f + f // 2
+
+
+def _halves(rec, piece: np.ndarray, off: float = 0.0) -> list[tuple[float, float, str]]:
+    """Кусок режется в тишине на две части, каждая декодируется с отступами. Пустая часть режется дальше, только если
+    в соседней есть текст: обе пусты — это не речь (музыка, шум), дальше не тратим время."""
+    h = _quiet_cut(piece)
+    parts = [(piece[:h], off), (piece[h:], off + h / SR)]
+    res = [_decode(rec, p, PAD_S) for p, _ in parts]
+    if not any(res):
+        return []
+    out = []
+    for (p, o), r in zip(parts, res):
+        if r:
+            out += [(o + a, o + b, t) for a, b, t in r]
+        elif len(p) / SR >= 2 * MIN_SPLIT_S:
+            out += _halves(rec, p, o)
+    return out
+
+
+def _words(r) -> int:
+    return sum(len(t.split()) for _, _, t in r)
+
+
+def decode_chunk(rec, piece: np.ndarray) -> list[tuple[float, float, str]]:
+    """Предложения куска VAD, время от его начала. Parakeet (greedy) иногда возвращает пусто на целом куске речи,
+    чаще когда кусок начат посреди слова (запись с середины фразы, разрез VAD по max_speech_duration). Тогда — запасной
+    путь: кусок короче 2 * MIN_SPLIT_S декодируется с тишиной PAD_S по краям; длиннее — режется пополам (_halves) и
+    декодируется целиком с отступами, берётся вариант, где больше слов. Отступ не ставится всегда: на обычных кусках
+    он терял фразы («Me at the zoo»: 3 предложения из 4) и замедлял распознавание."""
+    r = _decode(rec, piece)
+    dur = len(piece) / SR
+    if r or dur < MIN_SPLIT_S:
+        return r
+    if dur < 2 * MIN_SPLIT_S:
+        return _decode(rec, piece, PAD_S)
+    halves = _halves(rec, piece)
+    if not halves:
+        return []
+    whole = _decode(rec, piece, PAD_S)
+    return halves if _words(halves) > _words(whole) else whole
+
+
 def transcribe(rec, audio: np.ndarray, vad_dir: Path, max_len: float = 30.0,
                chunks: list[list[float]] | None = None) -> list[dict]:
     """Сегменты {"s","e","text"} по всему аудио; время от его начала. За раз декодируется один кусок VAD.
     chunks — готовые куски VAD [start, end] (секунды от начала audio); None — VAD запускается здесь."""
     segs = []
     for s, e in vad_chunks(audio, vad_dir, max_len=max_len) if chunks is None else chunks:
-        st = rec.create_stream()
-        st.accept_waveform(SR, audio[int(s * SR):int(e * SR)])
-        rec.decode_streams([st])
         segs += [{"s": round(s + a, 2), "e": round(s + b, 2), "text": t}
-                 for a, b, t in sentences(st.result, e - s)]
+                 for a, b, t in decode_chunk(rec, audio[int(s * SR):int(e * SR)])]
     return segs

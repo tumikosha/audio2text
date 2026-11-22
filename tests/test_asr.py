@@ -40,6 +40,63 @@ def test_transcribe_offset(monkeypatch, tmp_path):
     assert segs == [{"s": 0.0, "e": 2.0, "text": "hi."}, {"s": 10.0, "e": 12.0, "text": "hi."}]
 
 
+class PickyRec(FakeRec):
+    """Empty result on samples longer than `limit` s (the whole chunk, the padded chunk), text on shorter parts;
+    counts decodes."""
+
+    def __init__(self, limit):
+        self.limit, self.calls = limit, 0
+
+    def decode_streams(self, streams):
+        self.calls += 1
+        super().decode_streams(streams)
+        for st in streams:
+            if len(st.samples) / SR > self.limit:
+                st.result = SimpleNamespace(tokens=[], timestamps=[])
+
+
+def test_empty_chunk_split_into_parts():
+    rec = PickyRec(6.0)
+    segs = asr.transcribe(rec, np.zeros(30 * SR, np.float32), None, chunks=[[10.0, 20.0]])
+    assert segs and all(s["text"] == "hi." for s in segs)
+    assert all(10.0 <= s["s"] < s["e"] <= 20.0 for s in segs)
+    assert [s["s"] for s in segs] == sorted(s["s"] for s in segs)
+
+
+def test_empty_short_chunk_retried_padded():
+    rec = PickyRec(2.9)  # 3 s chunk: empty as is and padded (4 s)
+    assert asr.transcribe(rec, np.zeros(10 * SR, np.float32), None, chunks=[[0.0, 3.0]]) == []
+    assert rec.calls == 2  # as is, then padded; under 2 * MIN_SPLIT_S it is not split
+    rec = PickyRec(1.0)
+    assert asr.transcribe(rec, np.zeros(10 * SR, np.float32), None, chunks=[[0.0, 1.5]]) == []
+    assert rec.calls == 1  # under MIN_SPLIT_S: no retry
+
+
+def test_always_empty_stops():
+    rec = PickyRec(0.0)
+    assert asr.transcribe(rec, np.zeros(40 * SR, np.float32), None, chunks=[[0.0, 30.0]]) == []
+    assert rec.calls == 3  # as is, then two halves: both empty, not speech, no deeper split and no padded whole
+
+
+def test_text_chunk_decoded_once():
+    rec = PickyRec(100.0)
+    asr.transcribe(rec, np.zeros(30 * SR, np.float32), None, chunks=[[0.0, 10.0], [12.0, 20.0]])
+    assert rec.calls == 2
+
+
+def test_padded_times_inside_chunk():
+    class TailRec(FakeRec):
+        """One sentence starting in the trailing pad and one at the very start."""
+
+        def decode_streams(self, streams):
+            for st in streams:
+                n = len(st.samples) / SR
+                st.result = SimpleNamespace(tokens=["▁a", ".", "▁b", "."], timestamps=[0.0, 0.1, n - 0.2, n - 0.1])
+
+    got = asr._decode(TailRec(), np.zeros(2 * SR, np.float32), 0.5)
+    assert got == [(0.0, pytest.approx(2.0), "a.")]  # "b." lies in the pad: dropped, "a." clamped to the chunk
+
+
 class FakeVad:
     """Stands in for sherpa_onnx.VoiceActivityDetector: yields the given (start, end) seconds after flush()."""
 
