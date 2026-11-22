@@ -100,9 +100,11 @@ def resolve_asr(spec: str | None) -> AsrChoice:
     if spec is None:
         return AsrChoice(ASR_DEFAULT, model=ASR_MODELS[ASR_DEFAULT])
     folder = Path(spec).expanduser()
-    if folder.is_dir():
+    if spec and folder.is_dir():  # Path("") — это ".": пустое имя не считается папкой
         asr_files(folder)
-        return AsrChoice(folder.resolve().name, folder=folder)
+        return AsrChoice(folder.resolve().name or str(folder), folder=folder)
+    if "/" in spec or "\\" in spec or spec.startswith(("~", ".")):
+        raise SystemExit(f"папка модели не найдена: {spec}")
     if spec in ASR_MODELS:
         return AsrChoice(spec, model=ASR_MODELS[spec])
     raise SystemExit(f"модель не найдена: {spec}; доступные: {', '.join(ASR_MODELS)}; "

@@ -243,3 +243,26 @@ def test_resolve_asr_names():
     default = models.resolve_asr(None)
     assert default.label == "parakeet-tdt-0.6b-v3" and default.model is models.ASR
     assert models.ASR.name == "parakeet-tdt-0.6b-v3-int8"  # cache folder unchanged: no re-download
+
+
+@pytest.mark.parametrize("spec", ["нет/такой", "нет\\такой", "~/нет-такой-модели-a2t", "./нет", "./file.txt"])
+def test_resolve_asr_missing_folder(tmp_path: Path, monkeypatch, spec):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "file.txt").write_text("")
+    with pytest.raises(SystemExit) as e:
+        models.resolve_asr(spec)
+    assert str(e.value).startswith("папка модели не найдена: ")
+
+
+def test_resolve_asr_empty_is_unknown(tmp_path: Path, monkeypatch):
+    _touch(tmp_path, "encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+    monkeypatch.chdir(tmp_path)  # "" must not become "." even when cwd is a valid model folder
+    with pytest.raises(SystemExit) as e:
+        models.resolve_asr("")
+    assert str(e.value).startswith("модель не найдена: ; доступные: ")
+
+
+def test_resolve_asr_root_label(monkeypatch):
+    monkeypatch.setattr(models, "asr_files", lambda folder: None)
+    root = Path(Path.cwd().anchor)
+    assert models.resolve_asr(str(root)).label == str(root)
