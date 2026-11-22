@@ -193,7 +193,8 @@ def test_download_video_args_and_reuse(tmp_path, monkeypatch):
     assert p == tmp_path / "video" / "src.mp4"
     a = seen[0]
     assert a[a.index("-f") + 1] == "bv*+ba/b" and a[a.index("-S") + 1] == "vcodec:h264,res,acodec:aac"
-    assert a[a.index("--merge-output-format") + 1] == "mp4" and "--no-playlist" in a
+    assert a[a.index("--merge-output-format") + 1] == "mp4" and a[a.index("--remux-video") + 1] == "mp4"
+    assert "--no-playlist" in a
     assert a[a.index("--ffmpeg-location") + 1] == "/f/ffmpeg" and a[-1] == "u"
     assert sources.download_video("u", tmp_path) == p and len(seen) == 1
 
@@ -213,3 +214,12 @@ def test_download_video_ignores_streams_and_merge_temp(tmp_path, monkeypatch):
     monkeypatch.setattr(sources, "ffmpeg_exe", lambda: "/f/ffmpeg")
     assert sources.download_video("u", tmp_path).name == "src.mp4"
     assert len(seen) == 1
+
+
+def test_ytdlp_403_suggests_retry(monkeypatch):
+    monkeypatch.setattr(sources.shutil, "which", _which("uvx"))
+    monkeypatch.setattr(sources.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 1, "", "ERROR: unable to download video data: HTTP Error 403: Forbidden\n"))
+    with pytest.raises(SystemExit) as e:
+        sources._run(["u"])
+    assert str(e.value) == "yt-dlp: ERROR: unable to download video data: HTTP Error 403: Forbidden; повторите запуск"

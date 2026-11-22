@@ -28,21 +28,35 @@ def work_dir(source: str, out: Path | None) -> Path:
     return work_root() / hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
+_DESCRIPTION = """\
+Превращает аудио- или видеофайл либо ссылку на ролик YouTube в текст (файл .md): кто говорил, когда и что.
+Всё считается на вашем компьютере. По ссылке сначала берутся субтитры ролика (быстро, без говорящих)."""
+
+_EPILOG = """\
+примеры:
+  audio2text запись.mp3
+  audio2text интервью.mp4 итог.md
+  audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+  audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr
+  audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" --video --mp3
+  audio2text english_talk.m4a --model parakeet-tdt-0.6b-v2"""
+
+
 def _args(argv):
-    ap = argparse.ArgumentParser(prog="audio2text", description=__doc__,
+    ap = argparse.ArgumentParser(prog="audio2text", description=_DESCRIPTION, epilog=_EPILOG,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", help="аудио- или видеофайл либо ссылка YouTube")
+    ap.add_argument("source", help="аудио- или видеофайл с диска либо ссылка на один ролик YouTube")
     ap.add_argument("out", type=Path, nargs="?",
-                    help="файл .md; по умолчанию ./<название ролика или имя файла>.md")
+                    help="куда сохранить текст; без него — <имя файла>.md или <название ролика>.md в текущей папке")
     ap.add_argument("-tr", "--transcribe", action="store_true",
-                    help="ссылка: не брать субтитры, распознавать аудио с говорящими")
+                    help="для ссылки: не брать субтитры, а распознать звук с разделением на говорящих")
+    ap.add_argument("--video", action="store_true", help="только для ссылки: сохранить ролик в mp4 рядом с текстом")
+    ap.add_argument("--mp3", action="store_true", help="сохранить звук в mp3 рядом с текстом (ссылка или файл)")
     ap.add_argument("--model", metavar="M",
                     help=f"модель распознавания: {', '.join(models.ASR_MODELS)} "
                          f"(по умолчанию {models.ASR_DEFAULT}) или путь к папке с моделью")
-    ap.add_argument("--video", action="store_true",
-                    help="ссылка: сохранить и видео рядом с текстом, <выход>.mp4")
-    ap.add_argument("--mp3", action="store_true", help="сохранить и звук рядом с текстом, <выход>.mp3")
-    ap.add_argument("--keep", action="store_true", help="не удалять рабочую папку после успеха")
+    ap.add_argument("--keep", action="store_true",
+                    help="не удалять временные файлы (скачанный звук/видео) после успешной работы")
     return ap.parse_args(argv)
 
 
@@ -73,6 +87,9 @@ def _move(src: Path, dst: Path) -> None:
 def run(a, work: Path) -> int:
     asr_model = models.resolve_asr(a.model)  # неверный --model падает до чтения файла и сети
     url = sources.is_url(a.source)
+    for on, ext in ((a.mp3, ".mp3"), (a.video, ".mp4")):
+        if on and a.out and a.out.suffix.lower() == ext:
+            raise SystemExit(f"файл текста и сохраняемый файл совпадают: {a.out}; укажите итог с расширением .md")
     if a.video and not url:
         raise SystemExit("--video работает только для ссылки")
     if not url and not Path(a.source).is_file():

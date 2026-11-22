@@ -293,3 +293,15 @@ def test_cli_file_mp3(tmp_path, monkeypatch, iso):
     _fake_mp3(monkeypatch, calls)
     assert cli.main([str(src), "--mp3"]) == 0
     assert (iso / "встреча.mp3").read_bytes() == b"mp3 of m4a" and src.read_bytes() == b"m4a"
+
+
+def test_cli_out_is_media_target(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline, "transcribe_file", _touched)
+    monkeypatch.setattr(sources, "youtube_info", _touched)
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    for argv, out in (([URL, "итог.mp3", "--mp3"], "итог.mp3"), ([URL, "итог.MP4", "--video"], "итог.MP4"),
+                      ([str(src), "итог.mp3", "--mp3"], "итог.mp3")):
+        assert cli.main(argv) == 2
+        assert capsys.readouterr().err.strip() == (f"файл текста и сохраняемый файл совпадают: {out}; "
+                                                   "укажите итог с расширением .md")

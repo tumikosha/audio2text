@@ -52,7 +52,8 @@ def _run(args: list[str]) -> str:
                        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     if r.returncode != 0:
         lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
-        raise SystemExit(f"yt-dlp: {lines[-1].strip() if lines else f'код {r.returncode}'}")
+        last = lines[-1].strip() if lines else f"код {r.returncode}"
+        raise SystemExit(f"yt-dlp: {last}{'; повторите запуск' if 'HTTP Error 403' in last else ''}")
     return r.stdout
 
 
@@ -152,7 +153,8 @@ def download_video(url: str, work: Path) -> Path:
         return files[0]
     d.mkdir(parents=True, exist_ok=True)
     print(f"скачиваю видео {url}", flush=True)
-    _run(["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:aac", "--merge-output-format", "mp4", "--no-playlist",
+    _run(["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:aac", "--merge-output-format", "mp4",
+          "--remux-video", "mp4", "--no-playlist",
           "--ffmpeg-location", ffmpeg_exe(), "-o", str(d / "src.%(ext)s"), url])
     if not (files := done()):
         raise SystemExit(f"yt-dlp ничего не скачал: {url}")
