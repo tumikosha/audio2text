@@ -1,4 +1,4 @@
-"""Распознавание речи: Parakeet int8 на sherpa-onnx (CPU) по кускам от VAD, batch 1."""
+"""Распознавание речи: transducer (по умолчанию Parakeet int8) на sherpa-onnx (CPU) по кускам от VAD, batch 1."""
 
 import os
 from pathlib import Path
@@ -7,6 +7,7 @@ import numpy as np
 import sherpa_onnx
 
 from .media import SR
+from .models import asr_files
 from .vad import vad_chunks
 
 
@@ -15,10 +16,9 @@ def threads() -> int:
 
 
 def load_recognizer(model_dir: Path, threads: int) -> sherpa_onnx.OfflineRecognizer:
-    p = Path(model_dir)
+    enc, dec, join, tok = asr_files(Path(model_dir))
     return sherpa_onnx.OfflineRecognizer.from_transducer(
-        encoder=str(p / "encoder.int8.onnx"), decoder=str(p / "decoder.int8.onnx"),
-        joiner=str(p / "joiner.int8.onnx"), tokens=str(p / "tokens.txt"), num_threads=threads,
+        encoder=str(enc), decoder=str(dec), joiner=str(join), tokens=str(tok), num_threads=threads,
         model_type="nemo_transducer", decoding_method="greedy_search")
 
 

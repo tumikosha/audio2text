@@ -40,7 +40,7 @@ def _fake_url(monkeypatch, calls, tracks=(("ru", "subtitles"),)):
         p.write_bytes(b"x")
         return p
 
-    def transcribe_file(path, log=print):
+    def transcribe_file(path, log=print, model=None):
         calls.append("transcribe")
         return _doc(path)
 
@@ -58,7 +58,7 @@ def test_cli_unicode_path(tmp_path, monkeypatch, iso):
     src = tmp_path / "Записи" / "встреча 1.m4a"
     src.parent.mkdir()
     src.write_bytes(b"x")
-    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print: _doc(path))
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print, model=None: _doc(path))
     assert cli.main([str(src)]) == 0
     out = iso / "встреча 1.md"
     text = out.read_bytes().decode("utf-8")
@@ -70,7 +70,7 @@ def test_cli_unicode_path(tmp_path, monkeypatch, iso):
 def test_cli_explicit_out(tmp_path, monkeypatch, iso):
     src = tmp_path / "a.wav"
     src.write_bytes(b"x")
-    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print: _doc(path))
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print, model=None: _doc(path))
     assert cli.main([str(src), str(tmp_path / "итог" / "x.txt")]) == 0
     assert (tmp_path / "итог" / "x.txt").read_text(encoding="utf-8").startswith("# a\n")
 
@@ -107,7 +107,7 @@ def test_cli_unexpected_error_one_line(tmp_path, monkeypatch, capsys):
     src = tmp_path / "a.wav"
     src.write_bytes(b"x")
 
-    def boom(path, log=print):
+    def boom(path, log=print, model=None):
         raise RuntimeError("x\ny")
 
     monkeypatch.setattr(pipeline, "transcribe_file", boom)
@@ -127,7 +127,7 @@ def test_cli_error_log_unwritable(tmp_path, monkeypatch, capsys):
     blocker.write_text("")
     monkeypatch.setattr(cli, "work_root", lambda: blocker / "work")  # mkdir under a file fails
 
-    def boom(path, log=print):
+    def boom(path, log=print, model=None):
         raise RuntimeError("x")
 
     monkeypatch.setattr(pipeline, "transcribe_file", boom)
@@ -156,3 +156,28 @@ def test_end_to_end_public_sample(sample_wav, iso):
     text = (iso / "en.md").read_text(encoding="utf-8")
     assert "- Транскрипт: локально, parakeet-tdt-0.6b-v3\n" in text
     assert "**SPEAKER_00**" in text
+
+
+def test_cli_unknown_model_fails_before_work(tmp_path, monkeypatch, capsys):
+    def touched(*a, **k):
+        raise AssertionError("no work before the model is resolved")
+
+    monkeypatch.setattr(pipeline, "transcribe_file", touched)
+    monkeypatch.setattr(sources, "youtube_info", touched)
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    for source in (str(src), URL):
+        assert cli.main([source, "--model", "nope"]) == 2
+        err = capsys.readouterr().err.strip().splitlines()
+        assert err == ["модель не найдена: nope; доступные: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
+                       "или путь к папке с моделью"]
+
+
+def test_cli_model_passed_to_pipeline(tmp_path, monkeypatch, iso):
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"x")
+    got = []
+    monkeypatch.setattr(pipeline, "transcribe_file", lambda path, log=print, model=None: got.append(model) or
+                        _doc(path))
+    assert cli.main([str(src), "--model", "parakeet-tdt-0.6b-v2"]) == 0
+    assert got[0].label == "parakeet-tdt-0.6b-v2" and got[0].model.name == "parakeet-tdt-0.6b-v2-int8"

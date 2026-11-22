@@ -190,3 +190,56 @@ def test_cache_env_override(tmp_path: Path, monkeypatch):
     assert cli.work_root() == tmp_path / "c" / "work"
     monkeypatch.delenv("AUDIO2TEXT_CACHE")
     assert models.cache_dir().name == "models" and "audio2text" in str(models.cache_dir())
+
+
+def _touch(folder: Path, *names: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (folder / n).write_bytes(b"")
+    return folder
+
+
+def test_asr_files_int8(tmp_path: Path):
+    d = _touch(tmp_path / "m", "encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt",
+               "encoder.onnx")
+    assert [p.name for p in models.asr_files(d)] == [
+        "encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]
+
+
+def test_asr_files_plain_and_mixed(tmp_path: Path):
+    d = _touch(tmp_path / "m", "encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+    assert [p.name for p in models.asr_files(d)] == ["encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"]
+    _touch(d, "decoder.int8.onnx")
+    assert [p.name for p in models.asr_files(d)] == [
+        "encoder.onnx", "decoder.int8.onnx", "joiner.onnx", "tokens.txt"]
+
+
+def test_resolve_asr_folder_missing_joiner(tmp_path: Path):
+    d = _touch(tmp_path / "m", "encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt")
+    with pytest.raises(SystemExit) as e:
+        models.resolve_asr(str(d))
+    assert str(e.value) == f"в папке модели {d} нет файлов: joiner.onnx (или joiner.int8.onnx)"
+
+
+def test_resolve_asr_folder(tmp_path: Path, monkeypatch):
+    _touch(tmp_path / "моя-модель", "encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
+    monkeypatch.chdir(tmp_path)
+    c = models.resolve_asr("моя-модель")
+    assert c.label == "моя-модель" and c.model is None and c.folder == Path("моя-модель")
+
+
+def test_resolve_asr_unknown_name():
+    with pytest.raises(SystemExit) as e:
+        models.resolve_asr("nope")
+    assert str(e.value) == ("модель не найдена: nope; доступные: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
+                            "или путь к папке с моделью")
+
+
+def test_resolve_asr_names():
+    v2 = models.resolve_asr("parakeet-tdt-0.6b-v2")
+    assert v2.label == "parakeet-tdt-0.6b-v2" and v2.folder is None
+    assert v2.model.url == ("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+                            "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2")
+    default = models.resolve_asr(None)
+    assert default.label == "parakeet-tdt-0.6b-v3" and default.model is models.ASR
+    assert models.ASR.name == "parakeet-tdt-0.6b-v3-int8"  # cache folder unchanged: no re-download

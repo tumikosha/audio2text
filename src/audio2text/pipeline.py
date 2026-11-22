@@ -8,7 +8,6 @@ from pathlib import Path
 from . import asr, diarize, media, models, vad
 from .markdown import _hms
 
-TRANSCRIPT = "локально, parakeet-tdt-0.6b-v3"
 HEAD_S = 60.0  # скорость меряется на первых ≤ HEAD_S секундах
 HEAD_MIN_S = 30.0  # ... но не меньше этого, иначе замер шумный
 GAP_S = 0.8  # пауза между кусками VAD шире этого (порог склейки vad_chunks): там можно резать
@@ -25,12 +24,17 @@ def head_cut(chunks: list[list[float]]) -> float | None:
     return cut
 
 
-def transcribe_file(path: Path, log=print) -> dict:
+def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None) -> dict:
     """Файл -> {"source", "transcript", "audio_s", "speakers", "segments"}. Аудио читается до загрузки моделей:
-    не медиафайл падает сразу, без скачивания 0.5 ГБ."""
+    не медиафайл падает сразу, без скачивания 0.5 ГБ. model — из models.resolve_asr; None — по умолчанию."""
+    model = model or models.resolve_asr(None)
     audio = media.load_audio(path)
     dur = len(audio) / media.SR
-    asr_dir, vad_dir, spk_dir = models.ensure_all([models.ASR, models.VAD, models.SPEAKER], log=log)
+    if model.folder:
+        vad_dir, spk_dir = models.ensure_all([models.VAD, models.SPEAKER], log=log)
+        asr_dir = model.folder
+    else:
+        asr_dir, vad_dir, spk_dir = models.ensure_all([model.model, models.VAD, models.SPEAKER], log=log)
     n = asr.threads()
     rec = asr.load_recognizer(asr_dir, n)
     extractor = diarize.load_extractor(spk_dir, n)
@@ -57,5 +61,5 @@ def transcribe_file(path: Path, log=print) -> dict:
     log(f"распознано за {_hms(time.monotonic() - t0)}, определяю говорящих")
     segs, speakers = diarize.diarize(extractor, audio, segs)
     log(f"готово за {_hms(time.monotonic() - t0)}")
-    return {"source": str(path), "transcript": TRANSCRIPT, "audio_s": round(dur, 1), "speakers": speakers,
+    return {"source": str(path), "transcript": f"локально, {model.label}", "audio_s": round(dur, 1), "speakers": speakers,
             "segments": segs}

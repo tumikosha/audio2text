@@ -35,11 +35,15 @@ def _args(argv):
                     help="файл .md; по умолчанию ./<название ролика или имя файла>.md")
     ap.add_argument("-tr", "--transcribe", action="store_true",
                     help="ссылка: не брать субтитры, распознавать аудио с говорящими")
+    ap.add_argument("--model", metavar="M",
+                    help=f"модель распознавания: {', '.join(models.ASR_MODELS)} "
+                         f"(по умолчанию {models.ASR_DEFAULT}) или путь к папке с моделью")
     ap.add_argument("--keep", action="store_true", help="не удалять рабочую папку после успеха")
     return ap.parse_args(argv)
 
 
 def run(a, work: Path) -> int:
+    asr_model = models.resolve_asr(a.model)  # неверный --model падает до чтения файла и сети
     url = sources.is_url(a.source)
     if not url and not Path(a.source).is_file():
         raise SystemExit(f"файл не найден: {a.source}")
@@ -52,11 +56,11 @@ def run(a, work: Path) -> int:
                 if doc := sources.captions_doc(a.source, info, track, kind, work):
                     break
         if doc is None:
-            doc = pipeline.transcribe_file(sources.download(a.source, work))
+            doc = pipeline.transcribe_file(sources.download(a.source, work), model=asr_model)
             doc["source"], doc["title"] = a.source, info.get("title")
     else:
         out = a.out or Path(f"{Path(a.source).stem}.md")
-        doc = pipeline.transcribe_file(Path(a.source))
+        doc = pipeline.transcribe_file(Path(a.source), model=asr_model)
     write(doc, out)
     spk = f", говорящих: {len(doc['speakers'])}" if doc.get("speakers") else ""
     print(f"{out}: сегментов {len(doc['segments'])}{spk}", flush=True)

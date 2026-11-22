@@ -71,3 +71,17 @@ def test_estimate_does_not_scale_full_file_vad(monkeypatch, tmp_path):
     calls, logs = _fake(monkeypatch, 300.0, [[0.0, 50.0], [52.0, 300.0]], vad_s=60.0)
     pipeline.transcribe_file(tmp_path / "a.wav", log=logs.append)
     assert "длительность 0:05:00, оценка ~6 мин" in logs  # (50 / 51 * 300 + 60) / 60 = 5.9; scaled VAD would be ~11
+
+
+def test_transcribe_file_user_folder(monkeypatch, tmp_path):
+    calls, logs = _fake(monkeypatch, 45.0, [])
+    asked = []
+    monkeypatch.setattr(models, "ensure_all", lambda ms, log=print: asked.extend(m.name for m in ms) or
+                        [m.name for m in ms])
+    dirs = []
+    monkeypatch.setattr(asr, "load_recognizer", lambda d, n: dirs.append(d) or "rec")
+    folder = tmp_path / "my-model"
+    doc = pipeline.transcribe_file(tmp_path / "a.wav", log=logs.append,
+                                   model=models.AsrChoice("my-model", folder=folder))
+    assert asked == ["silero-vad", "nemo-titanet-small"] and dirs == [folder]
+    assert doc["transcript"] == "локально, my-model"

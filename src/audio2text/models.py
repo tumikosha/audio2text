@@ -39,6 +39,18 @@ ASR = Model(
     archive=True,
 )
 
+ASR_V2 = Model(
+    name="parakeet-tdt-0.6b-v2-int8",
+    url=f"{_BASE}/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+    sha256="6fc4426b54aa549a0019b8a75b8dea59164e71790a37ac56a045ad57f915f714",
+    size=482440461,
+    files=("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"),
+    archive=True,
+)
+
+ASR_MODELS = {"parakeet-tdt-0.6b-v3": ASR, "parakeet-tdt-0.6b-v2": ASR_V2}
+ASR_DEFAULT = "parakeet-tdt-0.6b-v3"
+
 VAD = Model(
     name="silero-vad",
     url=f"{_BASE}/asr-models/silero_vad.onnx",
@@ -56,6 +68,45 @@ SPEAKER = Model(
     files=("nemo_en_titanet_small.onnx",),
     archive=False,
 )
+
+
+@dataclass(frozen=True)
+class AsrChoice:
+    """Выбранная модель распознавания: model — качать (из списка), folder — готовая папка пользователя."""
+    label: str
+    model: Model | None = None
+    folder: Path | None = None
+
+
+def asr_files(folder: Path) -> tuple[Path, Path, Path, Path]:
+    """encoder, decoder, joiner, tokens в папке модели; для каждой роли .int8.onnx приоритетнее .onnx."""
+    found, missing = [], []
+    for role in ("encoder", "decoder", "joiner"):
+        for name in (f"{role}.int8.onnx", f"{role}.onnx"):
+            if (folder / name).is_file():
+                found.append(folder / name)
+                break
+        else:
+            missing.append(f"{role}.onnx (или {role}.int8.onnx)")
+    if not (folder / "tokens.txt").is_file():
+        missing.append("tokens.txt")
+    if missing:
+        raise SystemExit(f"в папке модели {folder} нет файлов: {', '.join(missing)}")
+    return found[0], found[1], found[2], folder / "tokens.txt"
+
+
+def resolve_asr(spec: str | None) -> AsrChoice:
+    """--model: существующая папка, иначе имя из ASR_MODELS; None — модель по умолчанию."""
+    if spec is None:
+        return AsrChoice(ASR_DEFAULT, model=ASR_MODELS[ASR_DEFAULT])
+    folder = Path(spec).expanduser()
+    if folder.is_dir():
+        asr_files(folder)
+        return AsrChoice(folder.resolve().name, folder=folder)
+    if spec in ASR_MODELS:
+        return AsrChoice(spec, model=ASR_MODELS[spec])
+    raise SystemExit(f"модель не найдена: {spec}; доступные: {', '.join(ASR_MODELS)}; "
+                     "или путь к папке с моделью")
 
 
 def cache_root() -> Path:
