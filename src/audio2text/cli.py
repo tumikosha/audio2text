@@ -56,7 +56,7 @@ def _args(argv):
                     help=f"модель распознавания: {', '.join(models.ASR_MODELS)} "
                          f"(по умолчанию {models.ASR_DEFAULT}) или путь к папке с моделью")
     ap.add_argument("--keep", action="store_true",
-                    help="не удалять временные файлы (скачанный звук/видео) после успешной работы")
+                    help="не удалять временные файлы (скачанный звук) после успешной работы")
     return ap.parse_args(argv)
 
 
@@ -73,15 +73,41 @@ def _check_free(a, out: Path, src: Path | None = None) -> None:
             raise SystemExit(f"файл уже есть: {p}; удалите его или укажите другой выход")
 
 
-def _move(src: Path, dst: Path) -> None:
-    """src -> dst через временное имя рядом с dst: рабочая папка может быть на другом диске."""
-    tmp = dst.with_name(f".{dst.stem}.tmp{dst.suffix}")
+def _save(jobs: list[tuple[str, Path, Path]]) -> None:
+    """jobs: [(вид, источник, цель)], вид "mp3" или "видео". Всё сначала готовится во временные файлы рядом
+    с целями (рабочая папка может быть на другом диске), затем os.replace каждого. При любой ошибке временные
+    файлы удаляются, уже появившиеся цели тоже: ни одной цели, повтор той же команды не упрётся в «файл уже есть»."""
+    tmps = [dst.with_name(f".{dst.stem}.part{dst.suffix}") for _, _, dst in jobs]
+    placed, moved = [], None
     try:
-        tmp.unlink(missing_ok=True)  # остаток оборванного запуска: на Windows переименование на него падает
-        shutil.move(src, tmp)
-        os.replace(tmp, dst)
+        for stage in ("prepare", "replace"):
+            for (kind, src, dst), tmp in zip(jobs, tmps):
+                try:
+                    if stage == "replace":
+                        os.replace(tmp, dst)
+                        placed.append(dst)
+                        continue
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    tmp.unlink(missing_ok=True)  # остаток оборванного запуска: на Windows перенос на него падает
+                    if kind == "mp3":
+                        media.to_mp3(src, tmp)
+                    else:
+                        shutil.move(src, tmp)
+                        moved = (tmp, src)
+                except OSError as e:
+                    raise SystemExit(f"не удалось сохранить {kind}: {dst}: {e.strerror or e}")
+    except BaseException:
+        for p in placed:
+            p.unlink(missing_ok=True)
+        if moved and moved[0].exists():  # вернуть ролик в рабочую папку: повтор не скачает его заново
+            try:
+                shutil.move(*moved)
+            except OSError:
+                pass
+        raise
     finally:
-        tmp.unlink(missing_ok=True)
+        for tmp in tmps:
+            tmp.unlink(missing_ok=True)
 
 
 def run(a, work: Path) -> int:
@@ -117,18 +143,17 @@ def run(a, work: Path) -> int:
     write(doc, out)
     spk = f", говорящих: {len(doc['speakers'])}" if doc.get("speakers") else ""
     print(f"{out}: сегментов {len(doc['segments'])}{spk}", flush=True)
-    saved = []
+    jobs = []
     if a.mp3:
         mp3 = out.with_suffix(".mp3")
         if not url and _same(src, mp3):
             print(f"звук уже в mp3: {mp3}", flush=True)
         else:
-            media.to_mp3(src, mp3)
-            saved.append(mp3)
+            jobs.append(("mp3", src, mp3))
     if a.video:  # после mp3: он делается из этого же файла
-        _move(src, out.with_suffix(".mp4"))
-        saved.append(out.with_suffix(".mp4"))
-    for p in saved:
+        jobs.append(("видео", src, out.with_suffix(".mp4")))
+    _save(jobs)
+    for _, _, p in jobs:
         print(f"сохранено: {p}", flush=True)
     if not a.keep:
         shutil.rmtree(work, ignore_errors=True)

@@ -223,3 +223,18 @@ def test_ytdlp_403_suggests_retry(monkeypatch):
     with pytest.raises(SystemExit) as e:
         sources._run(["u"])
     assert str(e.value) == "yt-dlp: ERROR: unable to download video data: HTTP Error 403: Forbidden; повторите запуск"
+
+
+def test_download_video_reuses_only_mp4(tmp_path, monkeypatch):
+    d = tmp_path / "video"
+    d.mkdir()
+    (d / "src.webm").write_bytes(b"x")
+    seen = []
+
+    def fake(args):
+        seen.append(args)
+        (d / "src.mp4").write_bytes(b"x")
+        return ""
+    monkeypatch.setattr(sources, "_run", fake)
+    monkeypatch.setattr(sources, "ffmpeg_exe", lambda: "/f/ffmpeg")
+    assert sources.download_video("u", tmp_path) == d / "src.mp4" and len(seen) == 1

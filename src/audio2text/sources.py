@@ -144,21 +144,18 @@ def download(url: str, work: Path) -> Path:
 def download_video(url: str, work: Path) -> Path:
     """Видео <url> в <work>/video/: лучшее качество, которое играют обычные плееры (h264 + aac в mp4); дорожки
     склеивает ffmpeg из imageio-ffmpeg. Прежняя загрузка переиспользуется."""
-    d = work / "video"
-
-    def done() -> list[Path]:  # только src.<ext>: src.f137.mp4 (одна дорожка) и src.temp.mp4 (склейка) — не итог
-        return [p for p in sorted(d.glob("src.*")) if re.fullmatch(r"src\.\w+", p.name) and _finished(p)]
-
-    if d.exists() and (files := done()):
-        return files[0]
+    p = work / "video" / "src.mp4"  # только итог: src.f137.mp4 (одна дорожка) и src.temp.mp4 (склейка) — нет
+    if p.is_file():
+        return p
+    d = p.parent
     d.mkdir(parents=True, exist_ok=True)
     print(f"скачиваю видео {url}", flush=True)
     _run(["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:aac", "--merge-output-format", "mp4",
           "--remux-video", "mp4", "--no-playlist",
           "--ffmpeg-location", ffmpeg_exe(), "-o", str(d / "src.%(ext)s"), url])
-    if not (files := done()):
+    if not p.is_file():
         raise SystemExit(f"yt-dlp ничего не скачал: {url}")
-    return files[0]
+    return p
 
 
 _RESERVED = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)", re.IGNORECASE)

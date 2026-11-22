@@ -305,3 +305,43 @@ def test_cli_out_is_media_target(tmp_path, monkeypatch, capsys):
         assert cli.main(argv) == 2
         assert capsys.readouterr().err.strip() == (f"файл текста и сохраняемый файл совпадают: {out}; "
                                                    "укажите итог с расширением .md")
+
+
+def _no_space(*a, **k):
+    raise OSError(28, "No space left on device")
+
+
+def test_cli_video_move_fails_leaves_no_targets(monkeypatch, capsys, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    _fake_mp3(monkeypatch, calls)
+    monkeypatch.setattr(cli.shutil, "move", _no_space)
+    assert cli.main([URL, "--video", "--mp3"]) == 2
+    assert capsys.readouterr().err.strip() == "не удалось сохранить видео: Лекция тема 1.mp4: No space left on device"
+    assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
+
+
+def test_cli_mp3_oserror_one_line(monkeypatch, capsys, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    monkeypatch.setattr(media, "to_mp3", _no_space)
+    assert cli.main([URL, "--mp3"]) == 2
+    assert capsys.readouterr().err.strip() == "не удалось сохранить mp3: Лекция тема 1.mp3: No space left on device"
+    assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
+
+
+def test_cli_second_replace_fails_removes_first_and_keeps_video(tmp_path, monkeypatch, capsys, iso):
+    calls = []
+    _fake_url(monkeypatch, calls)
+    _fake_mp3(monkeypatch, calls)
+    real = cli.os.replace
+
+    def replace(src, dst):
+        if str(dst).endswith(".mp4"):
+            raise OSError(28, "No space left on device")
+        real(src, dst)
+    monkeypatch.setattr(cli.os, "replace", replace)
+    assert cli.main([URL, "--video", "--mp3"]) == 2
+    assert "не удалось сохранить видео: Лекция тема 1.mp4: No space left on device" in capsys.readouterr().err
+    assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
+    assert (cli.work_dir(URL, None) / "video" / "src.mp4").read_bytes() == b"video"  # back in work: no re-download
