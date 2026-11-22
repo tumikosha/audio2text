@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 
 SR = 16000
+# Постоянное смещение (DC) в декодированной дорожке (aac с YouTube: среднее -0.055 при RMS 0.09) ломает silero VAD:
+# он почти не находит речь. Речь ниже 40 Гц не несёт, поэтому фильтр её не портит.
+HIGHPASS_HZ = 40
 
 
 def ffmpeg_exe() -> str:
@@ -27,7 +30,7 @@ def load_audio(path: Path) -> np.ndarray:
     """Файл любого формата -> float32 mono 16 кГц. Выход ffmpeg читается кусками в один растущий буфер,
     массив смотрит в него без копии: в памяти одна копия сэмплов (3 ч ~ 0.7 ГБ)."""
     cmd = [ffmpeg_exe(), "-nostdin", "-v", "error", "-i", str(path),
-           "-f", "f32le", "-ac", "1", "-ar", str(SR), "-"]
+           "-af", f"highpass=f={HIGHPASS_HZ}", "-f", "f32le", "-ac", "1", "-ar", str(SR), "-"]
     with tempfile.TemporaryFile() as err:  # stderr в файл: второй канал мог бы заполниться и встать
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err)
