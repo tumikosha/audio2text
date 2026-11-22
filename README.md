@@ -141,7 +141,7 @@ audio2text запись.mp3 --model путь/к/папке
 около 0,7 ГБ). Нужен интернет. Если загрузка оборвалась, запустите ту же команду ещё раз: загрузка продолжится
 с того же места. Потом модели берутся с диска, интернет для файлов уже не нужен (для ссылок YouTube нужен всегда).
 
-## Где лежат модели и как их удалить
+## Где лежат модели
 
 Модели и временные файлы лежат в папке кэша:
 
@@ -155,7 +155,30 @@ audio2text запись.mp3 --model путь/к/папке
 удаляются сами). Папку можно удалить целиком, это безопасно: при следующем запуске модели скачаются заново.
 Другую папку кэша можно задать переменной окружения `AUDIO2TEXT_CACHE`.
 
-Удалить саму программу: `uv tool uninstall audio2text`.
+## Удаление
+
+Одна команда удаляет программу вместе с моделями и временными файлами.
+
+macOS:
+
+```
+rm -rf ~/Library/Caches/audio2text && ~/.local/bin/uv tool uninstall audio2text
+```
+
+Linux:
+
+```
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/audio2text" && ~/.local/bin/uv tool uninstall audio2text
+```
+
+Windows (PowerShell):
+
+```
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\audio2text" -ErrorAction SilentlyContinue; & "$env:USERPROFILE\.local\bin\uv.exe" tool uninstall audio2text
+```
+
+Если вы задавали свою папку кэша через `AUDIO2TEXT_CACHE`, удалите и её. Сам uv остаётся, он может быть нужен
+другим программам.
 
 ## Обновление
 
