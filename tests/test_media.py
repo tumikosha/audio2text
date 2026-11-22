@@ -23,3 +23,14 @@ def test_load_audio_not_media(tmp_path: Path):
     with pytest.raises(SystemExit) as e:
         load_audio(p)
     assert str(e.value).startswith("не удалось прочитать аудио")
+
+
+def test_load_audio_ffmpeg_cannot_start(tmp_path: Path, monkeypatch):
+    from audio2text import media
+
+    p = tmp_path / "t.wav"
+    p.write_bytes(b"x")
+    monkeypatch.setattr(media, "ffmpeg_exe", lambda: str(tmp_path / "нет-ffmpeg"))
+    with pytest.raises(SystemExit) as e:
+        load_audio(p)
+    assert str(e.value).startswith("не удалось прочитать аудио")
