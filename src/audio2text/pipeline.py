@@ -51,6 +51,7 @@ def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None
         log(f"длительность {_hms(dur)}")
         with _bar(dur) as bar:
             segs = asr.transcribe(rec, audio, vad_dir, bar=bar)
+            bar.update(bar.total - bar.n)  # хвост после последнего куска VAD
     else:
         chunks = vad.vad_chunks(audio, vad_dir)
         vad_took = time.monotonic() - t0  # VAD всего файла: прибавляется к оценке один раз, не масштабируется
@@ -68,6 +69,7 @@ def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None
                 segs = head + asr.transcribe(rec, audio, vad_dir, chunks=[c for c in chunks if c[0] >= cut], bar=bar)
             else:
                 segs = asr.transcribe(rec, audio, vad_dir, chunks=chunks, bar=bar)
+            bar.update(bar.total - bar.n)  # хвост после последнего куска VAD
     log(f"распознано за {_hms(time.monotonic() - t0)}, определяю говорящих")
     segs, speakers = diarize.diarize(extractor, audio, segs)
     log(f"готово за {_hms(time.monotonic() - t0)}")

@@ -12,6 +12,7 @@ from .vad import vad_chunks
 
 PAD_S = 0.5  # тишина по краям куска в запасном пути
 MIN_SPLIT_S = 2.0  # пустой кусок короче этого не повторяется; часть короче 2 * MIN_SPLIT_S не режется
+WHOLE_RETRY_S = 8.0  # обе половины пусты: кусок короче этого ещё раз декодируется целиком с отступом
 
 
 def threads() -> int:
@@ -55,7 +56,7 @@ def _decode(rec, piece: np.ndarray, pad: float = 0.0) -> list[tuple[float, float
     out = []
     for a, b, t in sentences(st.result, len(piece) / SR):
         a, b = min(max(0.0, a - pad), dur), min(max(0.0, b - pad), dur)
-        if b > a:
+        if b > a or not pad:  # без отступа — как sentences(); с отступом схлопнутое в отступе отбрасывается
             out.append((a, b, t))
     return out
 
@@ -94,7 +95,8 @@ def decode_chunk(rec, piece: np.ndarray) -> list[tuple[float, float, str]]:
     """Предложения куска VAD, время от его начала. Parakeet (greedy) иногда возвращает пусто на целом куске речи,
     чаще когда кусок начат посреди слова (запись с середины фразы, разрез VAD по max_speech_duration). Тогда — запасной
     путь: кусок короче 2 * MIN_SPLIT_S декодируется с тишиной PAD_S по краям; длиннее — режется пополам (_halves) и
-    декодируется целиком с отступами, берётся вариант, где больше слов. Отступ не ставится всегда: на обычных кусках
+    декодируется целиком с отступами, берётся вариант, где больше слов; обе половины пусты — целиком с отступами,
+    только если кусок короче WHOLE_RETRY_S (длинный пустой кусок — обычно музыка, шум). Отступ не ставится всегда: на обычных кусках
     он терял фразы («Me at the zoo»: 3 предложения из 4) и замедлял распознавание."""
     r = _decode(rec, piece)
     dur = len(piece) / SR
@@ -104,7 +106,7 @@ def decode_chunk(rec, piece: np.ndarray) -> list[tuple[float, float, str]]:
         return _decode(rec, piece, PAD_S)
     halves = _halves(rec, piece)
     if not halves:
-        return []
+        return _decode(rec, piece, PAD_S) if dur < WHOLE_RETRY_S else []
     whole = _decode(rec, piece, PAD_S)
     return halves if _words(halves) > _words(whole) else whole
 

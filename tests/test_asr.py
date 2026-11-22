@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from audio2text import asr, models, vad
+from audio2text import asr, vad
 from audio2text.media import SR
 
 def test_sentences_split_on_punctuation():
@@ -58,9 +58,46 @@ class PickyRec(FakeRec):
 def test_empty_chunk_split_into_parts():
     rec = PickyRec(6.0)
     segs = asr.transcribe(rec, np.zeros(30 * SR, np.float32), None, chunks=[[10.0, 20.0]])
-    assert segs and all(s["text"] == "hi." for s in segs)
+    assert len(segs) == 4 and all(s["text"] == "hi." for s in segs)
     assert all(10.0 <= s["s"] < s["e"] <= 20.0 for s in segs)
     assert [s["s"] for s in segs] == sorted(s["s"] for s in segs)
+    # as is; halves 2.55 (text) + 7.45 (empty, split again: 1.91 text + 5.54 empty, split again: both text); padded
+    # whole (empty, the halves win)
+    assert rec.calls == 8
+
+
+class PadRec(FakeRec):
+    """Audio of ones, pad of zeros: empty without pad; padded samples longer than `long_s` give `long_text`,
+    shorter ones `short_text` (None: empty)."""
+
+    def __init__(self, long_s, long_text, short_text):
+        self.long_s, self.long_text, self.short_text, self.calls = long_s, long_text, short_text, 0
+
+    def decode_streams(self, streams):
+        self.calls += 1
+        for st in streams:
+            n = len(st.samples) / SR
+            text = None if st.samples[0] != 0 else self.long_text if n > self.long_s else self.short_text
+            st.result = (SimpleNamespace(tokens=[], timestamps=[]) if text is None else
+                         SimpleNamespace(tokens=[f"▁{w}" for w in text.split()], timestamps=[0.1 * i for i in
+                                                                                         range(len(text.split()))]))
+
+
+def test_padded_whole_wins_with_more_words():
+    rec = PadRec(10.5, "one two three.", "hi.")  # only the padded whole (11 s) is long
+    segs = asr.transcribe(rec, np.ones(12 * SR, np.float32), None, chunks=[[0.0, 10.0]])
+    assert [s["text"] for s in segs] == ["one two three."] and rec.calls == 4  # as is, two halves, padded whole
+    assert 0.0 <= segs[0]["s"] < segs[0]["e"] <= 10.0
+
+
+def test_short_chunk_both_halves_empty_padded_whole():
+    rec = PadRec(6.5, "hi there.", None)  # only the padded whole 6 s chunk (7 s) gives text
+    segs = asr.transcribe(rec, np.ones(8 * SR, np.float32), None, chunks=[[1.0, 7.0]])
+    assert [s["text"] for s in segs] == ["hi there."] and rec.calls == 4
+    assert 1.0 <= segs[0]["s"] < segs[0]["e"] <= 7.0
+    rec = PadRec(100.0, None, None)  # 6 s, always empty: as is, two halves, padded whole, nothing more
+    assert asr.transcribe(rec, np.ones(8 * SR, np.float32), None, chunks=[[1.0, 7.0]]) == []
+    assert rec.calls == 4
 
 
 def test_empty_short_chunk_retried_padded():
@@ -75,7 +112,7 @@ def test_empty_short_chunk_retried_padded():
 def test_always_empty_stops():
     rec = PickyRec(0.0)
     assert asr.transcribe(rec, np.zeros(40 * SR, np.float32), None, chunks=[[0.0, 30.0]]) == []
-    assert rec.calls == 3  # as is, then two halves: both empty, not speech, no deeper split and no padded whole
+    assert rec.calls == 3  # as is, two halves: both empty, not speech; >= WHOLE_RETRY_S: no padded whole, no deeper split
 
 
 def test_text_chunk_decoded_once():
@@ -95,6 +132,16 @@ def test_padded_times_inside_chunk():
 
     got = asr._decode(TailRec(), np.zeros(2 * SR, np.float32), 0.5)
     assert got == [(0.0, pytest.approx(2.0), "a.")]  # "b." lies in the pad: dropped, "a." clamped to the chunk
+
+
+def test_unpadded_keeps_zero_length_sentence():
+    class SameRec(FakeRec):
+        def decode_streams(self, streams):
+            for st in streams:
+                n = len(st.samples) / SR
+                st.result = SimpleNamespace(tokens=["▁a", "."], timestamps=[n, n])
+
+    assert asr._decode(SameRec(), np.zeros(2 * SR, np.float32)) == [(2.0, 2.0, "a.")]  # as sentences() gives it
 
 
 class FakeVad:
