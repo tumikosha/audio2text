@@ -144,6 +144,78 @@ def test_unpadded_keeps_zero_length_sentence():
     assert asr._decode(SameRec(), np.zeros(2 * SR, np.float32)) == [(2.0, 2.0, "a.")]  # as sentences() gives it
 
 
+class TruncRec(FakeRec):
+    """Unpadded samples (audio, not the zero pad, at [0]): words only in the first `head` s, or everywhere when
+    `head` is None. Padded samples: words every 0.3 s outside the pad, or only in the first second when `stuck`."""
+
+    def __init__(self, head, stuck=False):
+        self.head, self.stuck, self.calls = head, stuck, 0
+
+    def decode_streams(self, streams):
+        self.calls += 1
+        for st in streams:
+            n = len(st.samples) / SR
+            padded = st.samples[0] == 0
+            lo, hi = (asr.PAD_S, n - asr.PAD_S) if padded else (0.0, n)
+            if (self.stuck and padded) or (not padded and self.head is not None):
+                hi = min(hi, 1.0 if padded else self.head)
+            ts = list(np.arange(lo + 0.1, hi, 0.3))
+            st.result = SimpleNamespace(tokens=["▁w"] * len(ts), timestamps=ts)
+
+
+def _speech_audio(s):
+    audio = np.full(s * SR, 0.1, np.float32)
+    audio[0] = 0.2  # not zero: tells the chunk from the pad
+    return audio
+
+
+def test_truncated_chunk_filled():
+    rec = TruncRec(head=1.0)
+    segs = asr.transcribe(rec, _speech_audio(10), None, chunks=[[0.0, 10.0]])
+    words = " ".join(s["text"] for s in segs).split()
+    assert rec.calls == 2  # as is, the tail hole (under PIECE_S) padded
+    assert len(words) > 25  # 3 words before the hole, ~29 in it
+    assert all(0.0 <= s["s"] <= s["e"] <= 10.0 for s in segs)
+
+
+def test_normal_chunk_decoded_once():
+    rec = TruncRec(head=None)
+    segs = asr.transcribe(rec, _speech_audio(10), None, chunks=[[0.0, 10.0]])
+    assert rec.calls == 1 and len(segs[0]["text"].split()) == 33
+
+
+def test_hole_without_words_kept_and_stops():
+    rec = TruncRec(head=1.0, stuck=True)  # the hole decodes to almost nothing: music, noise
+    segs = asr.transcribe(rec, _speech_audio(12), None, chunks=[[0.0, 12.0]])
+    assert [s["text"] for s in segs] == ["w w w"]  # first pass as is
+    assert rec.calls == 2  # as is, the first piece of the 11 s hole (over PIECE_S); it has no words: stop there
+
+
+def test_long_hole_in_pieces_until_no_words():
+    class TwoPartRec(TruncRec):
+        """As TruncRec(head=1.0), but padded samples after the first two hole pieces give nothing."""
+
+        def decode_streams(self, streams):
+            super().decode_streams(streams)
+            if self.calls > 3:
+                streams[0].result = SimpleNamespace(tokens=[], timestamps=[])
+
+    rec = TwoPartRec(head=1.0)
+    segs = asr.transcribe(rec, _speech_audio(30), None, chunks=[[0.0, 30.0]])
+    ts = [s["s"] for s in segs]
+    assert rec.calls == 4  # as is, two pieces with words, the third without: stop
+    words = " ".join(s["text"] for s in segs).split()
+    assert 3 + 2 * 15 <= len(words) < 3 + 3 * 30 and ts == sorted(ts) and segs[-1]["e"] <= 30.0
+
+
+def test_silent_hole_not_decoded():
+    rec = TruncRec(head=1.0)
+    audio = _speech_audio(10)
+    audio[int(1.5 * SR):] = 0.0  # nothing after the words
+    asr.transcribe(rec, audio, None, chunks=[[0.0, 10.0]])
+    assert rec.calls == 1
+
+
 class FakeVad:
     """Stands in for sherpa_onnx.VoiceActivityDetector: yields the given (start, end) seconds after flush()."""
 
