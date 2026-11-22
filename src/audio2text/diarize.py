@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import sherpa_onnx
+from tqdm import tqdm
 
 from .media import SR
 
@@ -67,11 +68,13 @@ def windows(spans, total_s):
 
 
 def embed(extractor, audio, wins) -> np.ndarray:
-    """L2-normalised embeddings, one row per window; one stream at a time, each window zero-padded to WIN_S."""
+    """L2-normalised embeddings, one row per window; one stream at a time, each window zero-padded to WIN_S.
+    Progress bar in stderr, off when it is not a terminal."""
     n = int(WIN_S * SR)
     out = np.zeros((len(wins), extractor.dim), np.float32)
     chunk = np.zeros(n, np.float32)
-    for k, (_, s, _) in enumerate(wins):
+    for k, (_, s, _) in enumerate(tqdm(wins, desc="говорящие", disable=None, leave=False,
+                                       bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]")):
         a = max(0, int(s * SR))
         piece = audio[a:a + n]
         chunk[:] = 0.0

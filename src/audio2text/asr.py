@@ -110,11 +110,14 @@ def decode_chunk(rec, piece: np.ndarray) -> list[tuple[float, float, str]]:
 
 
 def transcribe(rec, audio: np.ndarray, vad_dir: Path, max_len: float = 30.0,
-               chunks: list[list[float]] | None = None) -> list[dict]:
+               chunks: list[list[float]] | None = None, bar=None) -> list[dict]:
     """Сегменты {"s","e","text"} по всему аудио; время от его начала. За раз декодируется один кусок VAD.
-    chunks — готовые куски VAD [start, end] (секунды от начала audio); None — VAD запускается здесь."""
+    chunks — готовые куски VAD [start, end] (секунды от начала audio); None — VAD запускается здесь.
+    bar — tqdm в секундах аудио: после каждого куска доводится до его конца."""
     segs = []
     for s, e in vad_chunks(audio, vad_dir, max_len=max_len) if chunks is None else chunks:
         segs += [{"s": round(s + a, 2), "e": round(s + b, 2), "text": t}
                  for a, b, t in decode_chunk(rec, audio[int(s * SR):int(e * SR)])]
+        if bar is not None and e > bar.n:
+            bar.update(e - bar.n)
     return segs

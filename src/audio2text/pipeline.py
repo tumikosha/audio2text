@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from tqdm import tqdm
+
 from . import asr, diarize, media, models, vad
 from .markdown import _hms
 
@@ -24,6 +26,12 @@ def head_cut(chunks: list[list[float]]) -> float | None:
     return cut
 
 
+def _bar(dur: float, done: float = 0.0) -> tqdm:
+    """Полоса распознавания в stderr, в секундах аудио; не в терминале (CI, перенаправление) выключена."""
+    return tqdm(total=round(dur, 1), initial=round(done, 1), desc="распознаю", disable=None, leave=False,
+                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f} с [{elapsed}<{remaining}]")
+
+
 def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None) -> dict:
     """Файл -> {"source", "transcript", "audio_s", "speakers", "segments"}. Аудио читается до загрузки моделей:
     не медиафайл падает сразу, без скачивания 0.5 ГБ. model — из models.resolve_asr; None — по умолчанию."""
@@ -41,7 +49,8 @@ def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None
     t0 = time.monotonic()
     if dur <= HEAD_S:
         log(f"длительность {_hms(dur)}")
-        segs = asr.transcribe(rec, audio, vad_dir)
+        with _bar(dur) as bar:
+            segs = asr.transcribe(rec, audio, vad_dir, bar=bar)
     else:
         chunks = vad.vad_chunks(audio, vad_dir)
         vad_took = time.monotonic() - t0  # VAD всего файла: прибавляется к оценке один раз, не масштабируется
@@ -54,10 +63,11 @@ def transcribe_file(path: Path, log=print, model: models.AsrChoice | None = None
             asr.transcribe(rec, audio[:int(HEAD_S * media.SR)], vad_dir)
         took = time.monotonic() - t1
         log(f"длительность {_hms(dur)}, оценка ~{max(1, round((took / head_s * dur + vad_took) / 60))} мин")
-        if cut:
-            segs = head + asr.transcribe(rec, audio, vad_dir, chunks=[c for c in chunks if c[0] >= cut])
-        else:
-            segs = asr.transcribe(rec, audio, vad_dir, chunks=chunks)
+        with _bar(dur, cut or 0.0) as bar:  # полоса после строки оценки: вывод не перемешивается
+            if cut:
+                segs = head + asr.transcribe(rec, audio, vad_dir, chunks=[c for c in chunks if c[0] >= cut], bar=bar)
+            else:
+                segs = asr.transcribe(rec, audio, vad_dir, chunks=chunks, bar=bar)
     log(f"распознано за {_hms(time.monotonic() - t0)}, определяю говорящих")
     segs, speakers = diarize.diarize(extractor, audio, segs)
     log(f"готово за {_hms(time.monotonic() - t0)}")

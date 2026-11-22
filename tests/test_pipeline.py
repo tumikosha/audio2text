@@ -31,7 +31,7 @@ def _fake(monkeypatch, dur, chunks, vad_s=0.0):
     monkeypatch.setattr(diarize, "load_extractor", lambda d, n: "ext")
     monkeypatch.setattr(vad, "vad_chunks", vad_chunks)
 
-    def transcribe(rec, audio, vad_dir, max_len=30.0, chunks=None):
+    def transcribe(rec, audio, vad_dir, max_len=30.0, chunks=None, bar=None):
         a, b = (chunks[0][0], chunks[-1][1]) if chunks else (0.0, len(audio) / SR)
         clock[0] += b - a
         calls.append((a, b) if chunks else round(b, 2))

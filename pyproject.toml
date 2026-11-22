@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=2,<3",
     "imageio-ffmpeg>=0.5,<1",
     "platformdirs>=4,<5",
+    "tqdm>=4,<5",
 ]
 
 [project.scripts]
