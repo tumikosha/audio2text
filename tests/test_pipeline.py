@@ -49,7 +49,7 @@ def test_transcribe_file_split_no_double_work(monkeypatch, tmp_path):
     assert calls == [(0.0, 50.0), (52.0, 300.0)]  # chunks from the one VAD pass, no second VAD, no shift
     assert [(s["s"], s["e"]) for s in doc["segments"]] == [(0.0, 50.0), (52.0, 300.0)]
     assert doc["transcript"] == "локально, parakeet-tdt-0.6b-v3" and doc["audio_s"] == 300.0
-    assert any(m.startswith("длительность 0:05:00, оценка ~") and m.endswith(" мин") for m in logs)
+    assert any(m.startswith("duration 0:05:00, estimate ~") and m.endswith(" min") for m in logs)
 
 
 def test_transcribe_file_no_gap_measures_then_full(monkeypatch, tmp_path):
@@ -63,14 +63,14 @@ def test_transcribe_file_short_once(monkeypatch, tmp_path):
     calls, logs = _fake(monkeypatch, 45.0, [])
     pipeline.transcribe_file(tmp_path / "a.wav", log=logs.append)
     assert calls == [45.0]
-    assert "длительность 0:00:45" in logs
+    assert "duration 0:00:45" in logs
 
 
 def test_estimate_does_not_scale_full_file_vad(monkeypatch, tmp_path):
     """Head 51 s of ASR (cut at 51) takes 50 s -> 300 s of audio ~ 294 s; full-file VAD 60 s is added once, not x6."""
     calls, logs = _fake(monkeypatch, 300.0, [[0.0, 50.0], [52.0, 300.0]], vad_s=60.0)
     pipeline.transcribe_file(tmp_path / "a.wav", log=logs.append)
-    assert "длительность 0:05:00, оценка ~6 мин" in logs  # (50 / 51 * 300 + 60) / 60 = 5.9; scaled VAD would be ~11
+    assert "duration 0:05:00, estimate ~6 min" in logs  # (50 / 51 * 300 + 60) / 60 = 5.9; scaled VAD would be ~11
 
 
 def test_transcribe_file_user_folder(monkeypatch, tmp_path):

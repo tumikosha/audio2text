@@ -61,7 +61,7 @@ def _fake_url(monkeypatch, calls, tracks=(("ru", "subtitles"),)):
 
 def test_cli_missing_file(capsys):
     assert cli.main(["нет такого.mp3"]) == 2
-    assert "файл не найден" in capsys.readouterr().err
+    assert "file not found" in capsys.readouterr().err
 
 
 def test_cli_unicode_path(tmp_path, monkeypatch, iso):
@@ -124,8 +124,8 @@ def test_cli_unexpected_error_one_line(tmp_path, monkeypatch, capsys):
     assert cli.main([str(src)]) == 1
     err = capsys.readouterr().err.strip().splitlines()
     assert len(err) == 1
-    assert err[0].startswith("ошибка: RuntimeError: x y (подробности: ")
-    log = err[0].rsplit("(подробности: ", 1)[1].rstrip(")")
+    assert err[0].startswith("error: RuntimeError: x y (details: ")
+    log = err[0].rsplit("(details: ", 1)[1].rstrip(")")
     assert log.endswith("error.log")
     assert "RuntimeError" in open(log, encoding="utf-8").read()
 
@@ -143,7 +143,7 @@ def test_cli_error_log_unwritable(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(pipeline, "transcribe_file", boom)
     assert cli.main([str(src)]) == 1
     err = capsys.readouterr().err.strip().splitlines()
-    assert err == ["ошибка: RuntimeError: x"]
+    assert err == ["error: RuntimeError: x"]
 
 
 def test_cli_not_media(tmp_path, capsys):
@@ -151,7 +151,7 @@ def test_cli_not_media(tmp_path, capsys):
     src = tmp_path / "заметки.txt"
     src.write_text("не аудио", encoding="utf-8")
     assert cli.main([str(src)]) == 2
-    assert "не удалось прочитать аудио" in capsys.readouterr().err
+    assert "cannot read audio" in capsys.readouterr().err
 
 
 def test_cli_help_exit_zero():
@@ -179,8 +179,8 @@ def test_cli_unknown_model_fails_before_work(tmp_path, monkeypatch, capsys):
     for source in (str(src), URL):
         assert cli.main([source, "--model", "nope"]) == 2
         err = capsys.readouterr().err.strip().splitlines()
-        assert err == ["модель не найдена: nope; доступные: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
-                       "или путь к папке с моделью"]
+        assert err == ["model not found: nope; available: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
+                       "or a path to a model folder"]
 
 
 def test_cli_model_passed_to_pipeline(tmp_path, monkeypatch, iso):
@@ -210,7 +210,7 @@ def test_cli_video_needs_url(tmp_path, monkeypatch, capsys):
     src = tmp_path / "a.wav"
     src.write_bytes(b"x")
     assert cli.main([str(src), "--video"]) == 2
-    assert capsys.readouterr().err.strip() == "--video работает только для ссылки"
+    assert capsys.readouterr().err.strip() == "--video works only with a link"
 
 
 def test_cli_existing_media_fails_before_work_file(tmp_path, monkeypatch, capsys, iso):
@@ -220,7 +220,7 @@ def test_cli_existing_media_fails_before_work_file(tmp_path, monkeypatch, capsys
     src.write_bytes(b"x")
     (iso / "a.mp3").write_bytes(b"old")
     assert cli.main([str(src), "--mp3"]) == 2
-    assert capsys.readouterr().err.strip() == "файл уже есть: a.mp3; удалите его или укажите другой выход"
+    assert capsys.readouterr().err.strip() == "file already exists: a.mp3; delete it or choose another output"
     assert (iso / "a.mp3").read_bytes() == b"old" and not (iso / "a.md").exists()
 
 
@@ -234,7 +234,7 @@ def test_cli_existing_media_fails_after_info_before_download(monkeypatch, capsys
         p = iso / f"Лекция тема 1{ext}"
         p.write_bytes(b"old")
         assert cli.main([URL, flag]) == 2
-        assert capsys.readouterr().err.strip() == f"файл уже есть: {p.name}; удалите его или укажите другой выход"
+        assert capsys.readouterr().err.strip() == f"file already exists: {p.name}; delete it or choose another output"
         assert p.read_bytes() == b"old"
         p.unlink()
     assert not (iso / "Лекция тема 1.md").exists()
@@ -250,7 +250,8 @@ def test_cli_url_video_and_mp3_from_one_download(monkeypatch, capsys, iso):
     assert (iso / "Лекция тема 1.mp3").read_bytes() == b"mp3 of video"
     assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md", "Лекция тема 1.mp3", "Лекция тема 1.mp4"]
     out = capsys.readouterr().out
-    assert "сохранено: Лекция тема 1.mp3\n" in out and "сохранено: Лекция тема 1.mp4\n" in out
+    assert f'saved: "{iso / "Лекция тема 1.mp3"}"\n' in out and f'saved: "{iso / "Лекция тема 1.mp4"}"\n' in out
+    assert out.endswith(f'result: "{iso / "Лекция тема 1.md"}"\n')
 
 
 def test_cli_url_captions_with_mp3(monkeypatch, iso):
@@ -282,7 +283,7 @@ def test_cli_file_mp3_is_source(tmp_path, monkeypatch, capsys):
     assert cli.main([str(src), str(d / "запись.md"), "--mp3"]) == 0
     assert src.read_bytes() == b"orig"
     out = capsys.readouterr().out
-    assert f"звук уже в mp3: {d / 'запись.mp3'}" in out and "сохранено" not in out
+    assert f'audio is already mp3: "{d / "запись.mp3"}"' in out and "saved" not in out
 
 
 def test_cli_file_mp3(tmp_path, monkeypatch, iso):
@@ -303,8 +304,8 @@ def test_cli_out_is_media_target(tmp_path, monkeypatch, capsys):
     for argv, out in (([URL, "итог.mp3", "--mp3"], "итог.mp3"), ([URL, "итог.MP4", "--video"], "итог.MP4"),
                       ([str(src), "итог.mp3", "--mp3"], "итог.mp3")):
         assert cli.main(argv) == 2
-        assert capsys.readouterr().err.strip() == (f"файл текста и сохраняемый файл совпадают: {out}; "
-                                                   "укажите итог с расширением .md")
+        assert capsys.readouterr().err.strip() == (f"text output and saved media are the same file: {out}; "
+                                                   "give an output ending in .md")
 
 
 def _no_space(*a, **k):
@@ -317,7 +318,7 @@ def test_cli_video_move_fails_leaves_no_targets(monkeypatch, capsys, iso):
     _fake_mp3(monkeypatch, calls)
     monkeypatch.setattr(cli.shutil, "move", _no_space)
     assert cli.main([URL, "--video", "--mp3"]) == 2
-    assert capsys.readouterr().err.strip() == "не удалось сохранить видео: Лекция тема 1.mp4: No space left on device"
+    assert capsys.readouterr().err.strip() == "cannot save video: Лекция тема 1.mp4: No space left on device"
     assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
 
 
@@ -326,7 +327,7 @@ def test_cli_mp3_oserror_one_line(monkeypatch, capsys, iso):
     _fake_url(monkeypatch, calls)
     monkeypatch.setattr(media, "to_mp3", _no_space)
     assert cli.main([URL, "--mp3"]) == 2
-    assert capsys.readouterr().err.strip() == "не удалось сохранить mp3: Лекция тема 1.mp3: No space left on device"
+    assert capsys.readouterr().err.strip() == "cannot save mp3: Лекция тема 1.mp3: No space left on device"
     assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
 
 
@@ -342,6 +343,6 @@ def test_cli_second_replace_fails_removes_first_and_keeps_video(tmp_path, monkey
         real(src, dst)
     monkeypatch.setattr(cli.os, "replace", replace)
     assert cli.main([URL, "--video", "--mp3"]) == 2
-    assert "не удалось сохранить видео: Лекция тема 1.mp4: No space left on device" in capsys.readouterr().err
+    assert "cannot save video: Лекция тема 1.mp4: No space left on device" in capsys.readouterr().err
     assert sorted(p.name for p in iso.iterdir()) == ["Лекция тема 1.md"]
     assert (cli.work_dir(URL, None) / "video" / "src.mp4").read_bytes() == b"video"  # back in work: no re-download

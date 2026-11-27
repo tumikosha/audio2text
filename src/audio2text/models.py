@@ -87,11 +87,11 @@ def asr_files(folder: Path) -> tuple[Path, Path, Path, Path]:
                 found.append(folder / name)
                 break
         else:
-            missing.append(f"{role}.onnx (или {role}.int8.onnx)")
+            missing.append(f"{role}.onnx (or {role}.int8.onnx)")
     if not (folder / "tokens.txt").is_file():
         missing.append("tokens.txt")
     if missing:
-        raise SystemExit(f"в папке модели {folder} нет файлов: {', '.join(missing)}")
+        raise SystemExit(f"model folder {folder} lacks files: {', '.join(missing)}")
     return found[0], found[1], found[2], folder / "tokens.txt"
 
 
@@ -104,11 +104,11 @@ def resolve_asr(spec: str | None) -> AsrChoice:
         asr_files(folder)
         return AsrChoice(folder.resolve().name or str(folder), folder=folder)
     if "/" in spec or "\\" in spec or spec.startswith(("~", ".")):
-        raise SystemExit(f"папка модели не найдена: {spec}")
+        raise SystemExit(f"model folder not found: {spec}")
     if spec in ASR_MODELS:
         return AsrChoice(spec, model=ASR_MODELS[spec])
-    raise SystemExit(f"модель не найдена: {spec}; доступные: {', '.join(ASR_MODELS)}; "
-                     "или путь к папке с моделью")
+    raise SystemExit(f"model not found: {spec}; available: {', '.join(ASR_MODELS)}; "
+                     "or a path to a model folder")
 
 
 def cache_root() -> Path:
@@ -129,7 +129,7 @@ def _sha256(path: Path) -> str:
 
 
 def _progress(done: int, total: int) -> None:
-    sys.stderr.write(f"\r  {done / 1e6:.0f} МБ из {total / 1e6:.0f} МБ")
+    sys.stderr.write(f"\r  {done / 1e6:.0f} MB of {total / 1e6:.0f} MB")
     sys.stderr.flush()
 
 
@@ -159,7 +159,7 @@ def _fetch(url: str, part: Path, total: int) -> None:
                         _progress(have, total)
             sys.stderr.write("\n")
             if total and have < total:
-                raise OSError("соединение оборвано")
+                raise OSError("connection dropped")
             return
         except urllib.error.HTTPError as e:
             if e.code == 416 and part.exists():
@@ -168,13 +168,13 @@ def _fetch(url: str, part: Path, total: int) -> None:
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             last = e
     reason = getattr(last, "reason", last)
-    if str(last) == "соединение оборвано":
+    if str(last) == "connection dropped":
         raise SystemExit(
-            f"загрузка прервана: {url}: соединение оборвано; "
-            "повторите запуск, докачка продолжится")
+            f"download interrupted: {url}: connection dropped; "
+            "run again to resume")
     if isinstance(last, urllib.error.HTTPError):
-        raise SystemExit(f"не удалось скачать модель: {url}: HTTP {last.code}")
-    raise SystemExit(f"нет сети или сервер недоступен: {url}: {reason}")
+        raise SystemExit(f"cannot download model: {url}: HTTP {last.code}")
+    raise SystemExit(f"no network or server unreachable: {url}: {reason}")
 
 
 def _extract(archive: Path, dest: Path, files: tuple[str, ...]) -> None:
@@ -192,7 +192,7 @@ def _extract(archive: Path, dest: Path, files: tuple[str, ...]) -> None:
                     tar.extract(member, tmp, filter="data")
         missing = [f for f in files if not (tmp / f).is_file()]
         if missing:
-            raise SystemExit(f"в архиве модели нет файлов: {', '.join(missing)}")
+            raise SystemExit(f"model archive lacks files: {', '.join(missing)}")
         dest.mkdir(parents=True, exist_ok=True)
         for f in files:
             os.replace(tmp / f, dest / f)
@@ -206,14 +206,14 @@ def _present(model: Model, cache: Path | None) -> bool:
 
 
 def _size_text(n: int) -> str:
-    return f"{n / 1e9:.1f} ГБ" if n >= 1e9 else f"{n / 1e6:.0f} МБ"
+    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB"
 
 
 def ensure_all(models_list: list[Model], cache: Path | None = None, log=print) -> list[Path]:
     """Папки всех моделей; перед первой загрузкой один раз пишет общий размер недостающих."""
     missing = sum(m.size for m in models_list if not _present(m, cache))
     if missing:
-        log(f"скачиваю модели: {_size_text(missing)}, один раз")
+        log(f"downloading models: {_size_text(missing)}, one time only")
     return [ensure(m, cache, log=lambda *_: None) for m in models_list]
 
 
@@ -223,7 +223,7 @@ def ensure(model: Model, cache: Path | None = None, log=print) -> Path:
     if _present(model, cache):
         return folder
     folder.mkdir(parents=True, exist_ok=True)
-    log(f"скачиваю модели: {_size_text(model.size)}, один раз")
+    log(f"downloading models: {_size_text(model.size)}, one time only")
     fname = Path(urlparse(model.url).path).name
     final = folder / fname
     part = folder / (fname + ".part")
@@ -231,7 +231,7 @@ def ensure(model: Model, cache: Path | None = None, log=print) -> Path:
     if _sha256(part) != model.sha256:
         part.unlink(missing_ok=True)
         raise SystemExit(
-            f"контрольная сумма модели не совпала: {model.url}; повторите запуск")
+            f"model checksum mismatch: {model.url}; run again")
     if model.archive:
         try:
             _extract(part, folder, model.files)
@@ -240,5 +240,5 @@ def ensure(model: Model, cache: Path | None = None, log=print) -> Path:
     else:
         os.replace(part, final)
         if fname not in model.files:
-            raise SystemExit(f"неверное описание модели: {model.name}")
+            raise SystemExit(f"bad model description: {model.name}")
     return folder

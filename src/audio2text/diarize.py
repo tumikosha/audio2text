@@ -11,6 +11,7 @@ import sherpa_onnx
 from tqdm import tqdm
 
 from .media import SR
+from .progress import spinner
 
 WIN_S, HOP_S = 1.5, 0.75
 FRAME_S = 0.25
@@ -45,7 +46,7 @@ def load_extractor(model_dir: Path, threads: int) -> sherpa_onnx.SpeakerEmbeddin
     """Speaker embedding model: the single .onnx file in model_dir."""
     onnx = sorted(Path(model_dir).glob("*.onnx"))
     if len(onnx) != 1:
-        raise SystemExit(f"в папке модели спикеров должен быть один .onnx: {model_dir}")
+        raise SystemExit(f"the speaker model folder must hold exactly one .onnx: {model_dir}")
     cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(onnx[0]), num_threads=threads, provider="cpu")
     return sherpa_onnx.SpeakerEmbeddingExtractor(cfg)
 
@@ -73,7 +74,7 @@ def embed(extractor, audio, wins) -> np.ndarray:
     n = int(WIN_S * SR)
     out = np.zeros((len(wins), extractor.dim), np.float32)
     chunk = np.zeros(n, np.float32)
-    for k, (_, s, _) in enumerate(tqdm(wins, desc="говорящие", disable=None, leave=False,
+    for k, (_, s, _) in enumerate(tqdm(wins, desc="speakers", disable=None, leave=False,
                                        bar_format="{desc}: {percentage:3.0f}%|{bar}| [{elapsed}<{remaining}]")):
         a = max(0, int(s * SR))
         piece = audio[a:a + n]
@@ -249,7 +250,8 @@ def diarize(extractor, audio: np.ndarray, segments: list[dict]) -> tuple[list[di
     if len(wins) < MIN_WINDOWS:  # too short to tell voices apart: one voice
         lab = np.zeros(len(wins), int)
     else:
-        lab = choose_labels(emb)
+        with spinner("grouping voices"):
+            lab = choose_labels(emb)
     raw = [(s, e, f"c{c}") for s, e, c, _ in runs(spans, wins, lab)]
     labels = assign(segments, raw)
     names = first_speech_names(labels, segments)

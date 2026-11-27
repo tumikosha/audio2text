@@ -40,7 +40,7 @@ def test_captions_doc_shape(tmp_path, monkeypatch, capsys):
     doc = sources.captions_doc("u", {"title": "T", "duration": 5}, "ru-orig", "auto", tmp_path)
     assert doc == {"source": "u", "title": "T", "transcript": "субтитры YouTube ru-orig (auto)", "audio_s": 5,
                    "speakers": {}, "segments": [{"s": 1.0, "e": 1.5, "text": "Привет", "turn": False}]}
-    assert "субтитры YouTube ru-orig (auto), распознавание не запускалось" in capsys.readouterr().out
+    assert "YouTube captions ru-orig (auto), no transcription run" in capsys.readouterr().out
 
 
 def test_json3_parsed_with_turns():
@@ -79,7 +79,7 @@ def test_ytdlp_default_uses_deno_wheel(monkeypatch):
 
 def test_ytdlp_without_uvx(monkeypatch):
     monkeypatch.setattr(sources.shutil, "which", lambda _: None)
-    with pytest.raises(SystemExit, match="нужен uv"):
+    with pytest.raises(SystemExit, match="uv is required"):
         sources.ytdlp()
 
 
@@ -89,7 +89,7 @@ def test_ytdlp_js_runtime_fallback(monkeypatch):
     monkeypatch.setattr(sources.shutil, "which", _which("deno", "node"))
     assert "--js-runtimes" not in sources.fallback_cmd()
     monkeypatch.setattr(sources.shutil, "which", lambda _: None)
-    with pytest.raises(SystemExit, match="JS-рантайм"):
+    with pytest.raises(SystemExit, match="JS runtime"):
         sources.fallback_cmd()
 
 
@@ -166,7 +166,7 @@ def test_run_forces_utf8(monkeypatch):
 def test_info_rejects_playlist_and_cleans_cache(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(sources, "_run", lambda args: seen.append(args) or '{"_type": "playlist", "entries": []}')
-    with pytest.raises(SystemExit, match="плейлист или канал"):
+    with pytest.raises(SystemExit, match="playlist or channel"):
         sources.youtube_info("https://youtube.com/playlist?list=L", tmp_path)
     assert not (tmp_path / "info.json").exists()
     assert "--playlist-items" in seen[0] and "--no-playlist" in seen[0]
@@ -222,7 +222,7 @@ def test_ytdlp_403_suggests_retry(monkeypatch):
         a[0], 1, "", "ERROR: unable to download video data: HTTP Error 403: Forbidden\n"))
     with pytest.raises(SystemExit) as e:
         sources._run(["u"])
-    assert str(e.value) == "yt-dlp: ERROR: unable to download video data: HTTP Error 403: Forbidden; повторите запуск"
+    assert str(e.value) == "yt-dlp: ERROR: unable to download video data: HTTP Error 403: Forbidden; run again"
 
 
 def test_download_video_reuses_only_mp4(tmp_path, monkeypatch):

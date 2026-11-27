@@ -23,7 +23,7 @@ def ffmpeg_exe() -> str:
         found = shutil.which("ffmpeg")
         if found:
             return found
-        raise SystemExit("ffmpeg не найден: установите ffmpeg или пакет imageio-ffmpeg")
+        raise SystemExit("ffmpeg not found: install ffmpeg or the imageio-ffmpeg package")
 
 
 def load_audio(path: Path) -> np.ndarray:
@@ -35,7 +35,7 @@ def load_audio(path: Path) -> np.ndarray:
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err)
         except OSError as e:
-            raise SystemExit(f"не удалось прочитать аудио: {path}: {e.strerror or e}")
+            raise SystemExit(f"cannot read audio: {path}: {e.strerror or e}")
         buf = bytearray()
         with proc:
             while chunk := proc.stdout.read(1 << 20):
@@ -44,8 +44,8 @@ def load_audio(path: Path) -> np.ndarray:
         if proc.returncode != 0 or not buf:
             err.seek(0)
             lines = err.read().decode("utf-8", "replace").strip().splitlines()
-            last = lines[-1] if lines else "нет аудиодорожки"
-            raise SystemExit(f"не удалось прочитать аудио: {path}: {last}")
+            last = lines[-1] if lines else "no audio track"
+            raise SystemExit(f"cannot read audio: {path}: {last}")
     return np.frombuffer(buf, dtype=np.float32)
 
 
@@ -60,10 +60,10 @@ def to_mp3(src: Path, dst: Path) -> None:
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         except OSError as e:
-            raise SystemExit(f"не удалось сохранить mp3: {e.strerror or e}")
+            raise SystemExit(f"cannot save mp3: {e.strerror or e}")
         if r.returncode != 0:
             lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
-            raise SystemExit(f"не удалось сохранить mp3: {lines[-1].strip() if lines else f'код {r.returncode}'}")
+            raise SystemExit(f"cannot save mp3: {lines[-1].strip() if lines else f'exit code {r.returncode}'}")
         os.replace(tmp, dst)
     finally:
         tmp.unlink(missing_ok=True)

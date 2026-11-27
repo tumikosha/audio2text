@@ -22,7 +22,7 @@ def test_load_audio_not_media(tmp_path: Path):
     p.write_text("это не аудио")
     with pytest.raises(SystemExit) as e:
         load_audio(p)
-    assert str(e.value).startswith("не удалось прочитать аудио")
+    assert str(e.value).startswith("cannot read audio")
 
 
 def test_load_audio_ffmpeg_cannot_start(tmp_path: Path, monkeypatch):
@@ -33,7 +33,7 @@ def test_load_audio_ffmpeg_cannot_start(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(media, "ffmpeg_exe", lambda: str(tmp_path / "нет-ffmpeg"))
     with pytest.raises(SystemExit) as e:
         load_audio(p)
-    assert str(e.value).startswith("не удалось прочитать аудио")
+    assert str(e.value).startswith("cannot read audio")
 
 
 def test_to_mp3_real_ffmpeg(tone_wav, tmp_path: Path):
@@ -50,7 +50,7 @@ def test_to_mp3_error_one_line_and_no_temp(tmp_path: Path):
     with pytest.raises(SystemExit) as e:
         to_mp3(src, dst)
     msg = str(e.value)
-    assert msg.startswith("не удалось сохранить mp3: ") and "\n" not in msg
+    assert msg.startswith("cannot save mp3: ") and "\n" not in msg
     assert list(tmp_path.iterdir()) == [src]
 
 

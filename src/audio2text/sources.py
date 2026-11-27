@@ -16,10 +16,11 @@ import subprocess
 from pathlib import Path
 
 from audio2text.media import ffmpeg_exe
+from audio2text.progress import spinner
 
-_UV_HINT = "нужен uv: https://docs.astral.sh/uv/"
-_JS_HINT = ("для ссылок YouTube нужен JS-рантайм: установите deno (https://deno.com) или node "
-            "(https://nodejs.org) либо уберите AUDIO2TEXT_YTDLP_NO_DENO")
+_UV_HINT = "uv is required: https://docs.astral.sh/uv/"
+_JS_HINT = ("YouTube links need a JS runtime: install deno (https://deno.com) or node "
+            "(https://nodejs.org), or unset AUDIO2TEXT_YTDLP_NO_DENO")
 _BASE = ["uvx", "--quiet"]
 _PKG = "yt-dlp[default]@latest"
 
@@ -52,8 +53,8 @@ def _run(args: list[str]) -> str:
                        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     if r.returncode != 0:
         lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
-        last = lines[-1].strip() if lines else f"код {r.returncode}"
-        raise SystemExit(f"yt-dlp: {last}{'; повторите запуск' if 'HTTP Error 403' in last else ''}")
+        last = lines[-1].strip() if lines else f"exit code {r.returncode}"
+        raise SystemExit(f"yt-dlp: {last}{'; run again' if 'HTTP Error 403' in last else ''}")
     return r.stdout
 
 
@@ -62,11 +63,12 @@ def youtube_info(url: str, work: Path) -> dict:
     p = work / "info.json"
     if not p.exists():
         work.mkdir(parents=True, exist_ok=True)
-        p.write_text(_run(["-J", "--no-playlist", "--playlist-items", "1", url]), encoding="utf-8")
+        with spinner("fetching video info"):
+            p.write_text(_run(["-J", "--no-playlist", "--playlist-items", "1", url]), encoding="utf-8")
     info = json.loads(p.read_text(encoding="utf-8"))
     if info.get("_type") == "playlist" or "entries" in info:
         p.unlink(missing_ok=True)
-        raise SystemExit("ссылка на плейлист или канал: укажите ссылку на одно видео")
+        raise SystemExit("playlist or channel link: give a link to one video")
     return info
 
 
@@ -105,17 +107,18 @@ def captions_doc(url: str, info: dict, track: str, kind: str, work: Path) -> dic
     """Транскрипт одной дорожки; None, если YouTube отдал её без текста (бывает с авторскими)."""
     d = work / "captions" / f"{kind}-{track}"
     d.mkdir(parents=True, exist_ok=True)
-    _run(["--skip-download", "--no-playlist", "--sub-format", "json3", "--sub-langs", track,
-          "--write-subs" if kind == "subtitles" else "--write-auto-subs", "-o", str(d / "sub.%(ext)s"), url])
+    with spinner(f"fetching captions {track}"):
+        _run(["--skip-download", "--no-playlist", "--sub-format", "json3", "--sub-langs", track,
+              "--write-subs" if kind == "subtitles" else "--write-auto-subs", "-o", str(d / "sub.%(ext)s"), url])
     files = sorted(d.glob("*.json3"))
     try:
         segs = parse_json3(json.loads(files[0].read_text(encoding="utf-8"))) if files else []
     except ValueError:
         segs = []
     if not segs:
-        print(f"субтитры YouTube {track} ({kind}) пусты, пропускаю", flush=True)
+        print(f"YouTube captions {track} ({kind}) are empty, skipping", flush=True)
         return None
-    print(f"субтитры YouTube {track} ({kind}), распознавание не запускалось", flush=True)
+    print(f"YouTube captions {track} ({kind}), no transcription run", flush=True)
     return {"source": url, "title": info.get("title"), "transcript": f"субтитры YouTube {track} ({kind})",
             "audio_s": info.get("duration"), "speakers": {}, "segments": segs}
 
@@ -132,12 +135,13 @@ def download(url: str, work: Path) -> Path:
     if done:
         return done[0]
     d.mkdir(parents=True, exist_ok=True)
-    print(f"скачиваю {url}", flush=True)
-    _run(["-f", "bestaudio/best", "--no-playlist", "--ffmpeg-location", ffmpeg_exe(),
-          "-o", str(d / "src.%(ext)s"), url])
+    print(f"downloading {url}", flush=True)
+    with spinner("downloading audio"):
+        _run(["-f", "bestaudio/best", "--no-playlist", "--ffmpeg-location", ffmpeg_exe(),
+              "-o", str(d / "src.%(ext)s"), url])
     files = [p for p in sorted(d.glob("src.*")) if _finished(p)]
     if not files:
-        raise SystemExit(f"yt-dlp ничего не скачал: {url}")
+        raise SystemExit(f"yt-dlp downloaded nothing: {url}")
     return files[0]
 
 
@@ -149,12 +153,13 @@ def download_video(url: str, work: Path) -> Path:
         return p
     d = p.parent
     d.mkdir(parents=True, exist_ok=True)
-    print(f"скачиваю видео {url}", flush=True)
-    _run(["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:aac", "--merge-output-format", "mp4",
-          "--remux-video", "mp4", "--no-playlist",
-          "--ffmpeg-location", ffmpeg_exe(), "-o", str(d / "src.%(ext)s"), url])
+    print(f"downloading video {url}", flush=True)
+    with spinner("downloading video"):
+        _run(["-f", "bv*+ba/b", "-S", "vcodec:h264,res,acodec:aac", "--merge-output-format", "mp4",
+              "--remux-video", "mp4", "--no-playlist",
+              "--ffmpeg-location", ffmpeg_exe(), "-o", str(d / "src.%(ext)s"), url])
     if not p.is_file():
-        raise SystemExit(f"yt-dlp ничего не скачал: {url}")
+        raise SystemExit(f"yt-dlp downloaded nothing: {url}")
     return p
 
 

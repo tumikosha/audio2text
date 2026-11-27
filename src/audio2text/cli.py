@@ -11,10 +11,12 @@ import os
 import shutil
 import sys
 import traceback
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from . import media, models, pipeline, sources
 from .markdown import write
+from .progress import spinner
 
 
 def work_root() -> Path:
@@ -29,34 +31,42 @@ def work_dir(source: str, out: Path | None) -> Path:
 
 
 _DESCRIPTION = """\
-Превращает аудио- или видеофайл либо ссылку на ролик YouTube в текст (файл .md): кто говорил, когда и что.
-Всё считается на вашем компьютере. По ссылке сначала берутся субтитры ролика (быстро, без говорящих)."""
+Turns an audio or video file, or a YouTube video link, into text (a .md file): who spoke, when, and what.
+Everything runs on your computer. For a link, the video's captions are tried first (fast, no speakers)."""
 
 _EPILOG = """\
-примеры:
-  audio2text запись.mp3
-  audio2text интервью.mp4 итог.md
+examples:
+  audio2text recording.mp3
+  audio2text interview.mp4 result.md
   audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw"
   audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" -tr
   audio2text "https://www.youtube.com/watch?v=jNQXAC9IVRw" --video --mp3
   audio2text english_talk.m4a --model parakeet-tdt-0.6b-v2"""
 
 
+def _version() -> str:
+    try:
+        return version("audio2text")
+    except PackageNotFoundError:  # запуск из исходников без установки
+        return "unknown"
+
+
 def _args(argv):
     ap = argparse.ArgumentParser(prog="audio2text", description=_DESCRIPTION, epilog=_EPILOG,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", help="аудио- или видеофайл с диска либо ссылка на один ролик YouTube")
+    ap.add_argument("-V", "--version", action="version", version=f"audio2text {_version()}")
+    ap.add_argument("source", help="audio or video file on disk, or a link to one YouTube video")
     ap.add_argument("out", type=Path, nargs="?",
-                    help="куда сохранить текст; без него — <имя файла>.md или <название ролика>.md в текущей папке")
+                    help="where to save the text; default: <file name>.md or <video title>.md in the current folder")
     ap.add_argument("-tr", "--transcribe", action="store_true",
-                    help="для ссылки: не брать субтитры, а распознать звук с разделением на говорящих")
-    ap.add_argument("--video", action="store_true", help="только для ссылки: сохранить ролик в mp4 рядом с текстом")
-    ap.add_argument("--mp3", action="store_true", help="сохранить звук в mp3 рядом с текстом (ссылка или файл)")
+                    help="for a link: skip captions, transcribe the audio with speaker labels")
+    ap.add_argument("--video", action="store_true", help="link only: save the video as mp4 next to the text")
+    ap.add_argument("--mp3", action="store_true", help="save the audio as mp3 next to the text (link or file)")
     ap.add_argument("--model", metavar="M",
-                    help=f"модель распознавания: {', '.join(models.ASR_MODELS)} "
-                         f"(по умолчанию {models.ASR_DEFAULT}) или путь к папке с моделью")
+                    help=f"speech recognition model: {', '.join(models.ASR_MODELS)} "
+                         f"(default {models.ASR_DEFAULT}) or a path to a model folder")
     ap.add_argument("--keep", action="store_true",
-                    help="не удалять временные файлы (скачанный звук) после успешной работы")
+                    help="keep temporary files (downloaded audio) after a successful run")
     return ap.parse_args(argv)
 
 
@@ -70,7 +80,7 @@ def _check_free(a, out: Path, src: Path | None = None) -> None:
     for on, ext in ((a.mp3, ".mp3"), (a.video, ".mp4")):
         p = out.with_suffix(ext)
         if on and p.exists() and not (src and _same(src, p)):
-            raise SystemExit(f"файл уже есть: {p}; удалите его или укажите другой выход")
+            raise SystemExit(f"file already exists: {p}; delete it or choose another output")
 
 
 def _save(jobs: list[tuple[str, Path, Path]]) -> None:
@@ -95,7 +105,7 @@ def _save(jobs: list[tuple[str, Path, Path]]) -> None:
                         shutil.move(src, tmp)
                         moved = (tmp, src)
                 except OSError as e:
-                    raise SystemExit(f"не удалось сохранить {kind}: {dst}: {e.strerror or e}")
+                    raise SystemExit(f"cannot save {kind}: {dst}: {e.strerror or e}")
     except BaseException:
         for p in placed:
             p.unlink(missing_ok=True)
@@ -115,11 +125,11 @@ def run(a, work: Path) -> int:
     url = sources.is_url(a.source)
     for on, ext in ((a.mp3, ".mp3"), (a.video, ".mp4")):
         if on and a.out and a.out.suffix.lower() == ext:
-            raise SystemExit(f"файл текста и сохраняемый файл совпадают: {a.out}; укажите итог с расширением .md")
+            raise SystemExit(f"text output and saved media are the same file: {a.out}; give an output ending in .md")
     if a.video and not url:
-        raise SystemExit("--video работает только для ссылки")
+        raise SystemExit("--video works only with a link")
     if not url and not Path(a.source).is_file():
-        raise SystemExit(f"файл не найден: {a.source}")
+        raise SystemExit(f"file not found: {a.source}")
     if url:
         info = sources.youtube_info(a.source, work)
         out = a.out or Path(f"{sources.title_name(info.get('title') or 'transcript')}.md")
@@ -141,20 +151,23 @@ def run(a, work: Path) -> int:
         _check_free(a, out, src)
         doc = pipeline.transcribe_file(src, model=asr_model)
     write(doc, out)
-    spk = f", говорящих: {len(doc['speakers'])}" if doc.get("speakers") else ""
-    print(f"{out}: сегментов {len(doc['segments'])}{spk}", flush=True)
+    spk = f", speakers: {len(doc['speakers'])}" if doc.get("speakers") else ""
+    print(f"segments {len(doc['segments'])}{spk}", flush=True)
     jobs = []
     if a.mp3:
         mp3 = out.with_suffix(".mp3")
         if not url and _same(src, mp3):
-            print(f"звук уже в mp3: {mp3}", flush=True)
+            print(f"audio is already mp3: \"{mp3.resolve()}\"", flush=True)
         else:
             jobs.append(("mp3", src, mp3))
     if a.video:  # после mp3: он делается из этого же файла
-        jobs.append(("видео", src, out.with_suffix(".mp4")))
-    _save(jobs)
+        jobs.append(("video", src, out.with_suffix(".mp4")))
+    if jobs:
+        with spinner("saving files"):
+            _save(jobs)
     for _, _, p in jobs:
-        print(f"сохранено: {p}", flush=True)
+        print(f"saved: \"{p.resolve()}\"", flush=True)
+    print(f"result: \"{out.resolve()}\"", flush=True)  # последней строкой, в кавычках: путь с пробелами копируется в команду целиком
     if not a.keep:
         shutil.rmtree(work, ignore_errors=True)
     return 0
@@ -164,7 +177,10 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):  # консоль Windows в cp1251/cp866: не падать на символах из названий
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
-    a = _args(argv)
+    args = sys.argv[1:] if argv is None else argv
+    if not {"-V", "--version"} & set(args):  # версия до разбора: видна и при ошибке аргументов, и с -h
+        print(f"audio2text {_version()}", flush=True)
+    a = _args(args)
     work = None
     try:
         work = work_dir(a.source, a.out)
@@ -175,16 +191,16 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         raise
     except KeyboardInterrupt:
-        print("прервано", file=sys.stderr, flush=True)
+        print("interrupted", file=sys.stderr, flush=True)
         return 130
     except Exception as e:
-        text = f"ошибка: {type(e).__name__}: {' '.join(str(e).split())}"
+        text = f"error: {type(e).__name__}: {' '.join(str(e).split())}"
         try:
             work = work or work_root()
             work.mkdir(parents=True, exist_ok=True)
             log = work / "error.log"
             log.write_text(traceback.format_exc(), encoding="utf-8")
-            text += f" (подробности: {log})"
+            text += f" (details: {log})"
         except Exception:  # журнал не записать (кэш недоступен): одна строка без пути
             pass
         print(text, file=sys.stderr, flush=True)

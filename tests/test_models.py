@@ -79,7 +79,7 @@ def test_ensure_downloads_and_verifies(tmp_path: Path, serve):
     logs = []
     folder = ensure(m, tmp_path, log=logs.append)
     assert (folder / "m.bin").read_bytes() == data
-    assert logs and "скачиваю модели" in logs[0]
+    assert logs and "downloading models" in logs[0]
     n = len(s.requests)
     ensure(m, tmp_path, log=logs.append)
     assert len(s.requests) == n
@@ -93,7 +93,7 @@ def test_ensure_all_one_message_then_downloads(tmp_path: Path, serve):
     folders = models.ensure_all([ma, mb], tmp_path, log=logs.append)
     assert folders == [tmp_path / "ma", tmp_path / "mb"]
     assert (folders[0] / "m.bin").read_bytes() == a and (folders[1] / "m.bin").read_bytes() == b
-    assert len(logs) == 1 and logs[0].startswith("скачиваю модели: ")
+    assert len(logs) == 1 and logs[0].startswith("downloading models: ")
     logs.clear()
     assert models.ensure_all([ma, mb], tmp_path, log=logs.append) == folders
     assert logs == []
@@ -108,10 +108,10 @@ def test_ensure_all_sums_only_missing(tmp_path: Path, monkeypatch):
     (tmp_path / "c").mkdir()
     (tmp_path / "c" / "x").write_bytes(b"")
     models.ensure_all([big, small, cached], tmp_path, log=logs.append)
-    assert logs == ["скачиваю модели: 1.5 ГБ, один раз"]
+    assert logs == ["downloading models: 1.5 GB, one time only"]
     logs.clear()
     models.ensure_all([small, cached], tmp_path, log=logs.append)
-    assert logs == ["скачиваю модели: 40 МБ, один раз"]
+    assert logs == ["downloading models: 40 MB, one time only"]
 
 
 def test_ensure_bad_sha_rejected(tmp_path: Path, serve):
@@ -120,7 +120,7 @@ def test_ensure_bad_sha_rejected(tmp_path: Path, serve):
     m = Model(m.name, m.url, m.sha256, 12, m.files, False)
     with pytest.raises(SystemExit) as e:
         ensure(m, tmp_path, log=lambda *_: None)
-    assert "контрольная сумма" in str(e.value)
+    assert "checksum mismatch" in str(e.value)
     assert not (tmp_path / "m" / "m.bin").exists()
 
 
@@ -142,7 +142,7 @@ def test_ensure_offline_message(tmp_path: Path):
     m = Model("m", url, "0" * 64, 10, ("m.bin",), False)
     with pytest.raises(SystemExit) as e:
         ensure(m, tmp_path, log=lambda *_: None)
-    assert "нет сети" in str(e.value) and url in str(e.value)
+    assert "no network" in str(e.value) and url in str(e.value)
 
 
 def test_ensure_archive_extracted(tmp_path: Path, serve):
@@ -177,7 +177,7 @@ def test_ensure_truncated_always_keeps_part(tmp_path: Path, serve):
     m = _model(s.url, data)
     with pytest.raises(SystemExit) as e:
         ensure(m, tmp_path, log=lambda *_: None)
-    assert "прервана" in str(e.value)
+    assert "interrupted" in str(e.value)
     part = tmp_path / "m" / "m.bin.part"
     assert part.exists() and 0 < part.stat().st_size < len(data)
 
@@ -218,7 +218,7 @@ def test_resolve_asr_folder_missing_joiner(tmp_path: Path):
     d = _touch(tmp_path / "m", "encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt")
     with pytest.raises(SystemExit) as e:
         models.resolve_asr(str(d))
-    assert str(e.value) == f"в папке модели {d} нет файлов: joiner.onnx (или joiner.int8.onnx)"
+    assert str(e.value) == f"model folder {d} lacks files: joiner.onnx (or joiner.int8.onnx)"
 
 
 def test_resolve_asr_folder(tmp_path: Path, monkeypatch):
@@ -231,8 +231,8 @@ def test_resolve_asr_folder(tmp_path: Path, monkeypatch):
 def test_resolve_asr_unknown_name():
     with pytest.raises(SystemExit) as e:
         models.resolve_asr("nope")
-    assert str(e.value) == ("модель не найдена: nope; доступные: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
-                            "или путь к папке с моделью")
+    assert str(e.value) == ("model not found: nope; available: parakeet-tdt-0.6b-v3, parakeet-tdt-0.6b-v2; "
+                            "or a path to a model folder")
 
 
 def test_resolve_asr_names():
@@ -251,7 +251,7 @@ def test_resolve_asr_missing_folder(tmp_path: Path, monkeypatch, spec):
     (tmp_path / "file.txt").write_text("")
     with pytest.raises(SystemExit) as e:
         models.resolve_asr(spec)
-    assert str(e.value).startswith("папка модели не найдена: ")
+    assert str(e.value).startswith("model folder not found: ")
 
 
 def test_resolve_asr_empty_is_unknown(tmp_path: Path, monkeypatch):
@@ -259,7 +259,7 @@ def test_resolve_asr_empty_is_unknown(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # "" must not become "." even when cwd is a valid model folder
     with pytest.raises(SystemExit) as e:
         models.resolve_asr("")
-    assert str(e.value).startswith("модель не найдена: ; доступные: ")
+    assert str(e.value).startswith("model not found: ; available: ")
 
 
 def test_resolve_asr_root_label(monkeypatch):
